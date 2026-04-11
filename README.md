@@ -1,5 +1,7 @@
 # 🚀 podkop-xray
 
+> 🇷🇺 **[Русская версия / Russian version](README_RU.md)**
+
 🔒 Selective domain routing for OpenWrt using **Xray-core** with **REALITY** security for maximum DPI resistance.
 
 An alternative to [podkop](https://github.com/itdoginfo/podkop) that replaces sing-box with Xray-core, focusing on VLESS+REALITY combinations with advanced transports.
@@ -150,6 +152,11 @@ Controls the order of geosite/geoip rule evaluation (first match wins). The last
 | `proxy_direct_block` | Proxy → Direct → Block | block |
 | `block_proxy_direct` | Block → Proxy → Direct (default) | direct |
 | `direct_proxy_block` | Direct → Proxy → Block | block |
+
+### 📚 Advanced documentation
+
+- 🛡️ [Maximum DPI protection guide](docs/xray-max-protection-config.md) — full client + server configs with VLESS+XHTTP+REALITY+Finalmask, layer-by-layer DPI resistance breakdown, all available Finalmask layers reference
+- 🖥️ [Server config example](docs/server-config-example.json) — ready-to-use Xray server config with XHTTP+REALITY+Finalmask (fragment+sudoku) and chain proxy outbound
 
 ## 🏷️ Versioning
 
