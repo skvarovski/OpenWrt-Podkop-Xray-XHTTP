@@ -1,57 +1,57 @@
-# podkop-xray
+# 🚀 podkop-xray
 
-Selective domain routing for OpenWrt using **Xray-core** with **REALITY** security for maximum DPI resistance.
+🔒 Selective domain routing for OpenWrt using **Xray-core** with **REALITY** security for maximum DPI resistance.
 
 An alternative to [podkop](https://github.com/itdoginfo/podkop) that replaces sing-box with Xray-core, focusing on VLESS+REALITY combinations with advanced transports.
 
-## Installation (one command)
+## 📦 Installation (one command)
 
 ```sh
 wget -qO- https://raw.githubusercontent.com/skvarovski/OpenWrt-Podkop-Xray-XHTTP/main/install.sh | sh
 ```
 
 This will:
-1. Download and install **xray-core 26.3.27** (binary from GitHub releases)
-2. Install **podkop-xray** + **luci-app-podkop-xray** APK packages
-3. Install all dependencies (`curl`, `jq`, `kmod-nft-tproxy`, etc.)
-4. Enable the service
+1. 📥 Download and install **xray-core 26.3.27** (binary from GitHub releases)
+2. 📦 Install **podkop-xray** + **luci-app-podkop-xray** APK packages
+3. 🔧 Install all dependencies (`curl`, `jq`, `kmod-nft-tproxy`, etc.)
+4. ✅ Enable the service
 
 After installation:
-- Open LuCI web UI → Services → Podkop Xray
-- Paste your VLESS+REALITY proxy string
-- Save & Apply, then start the service
+- 🌐 Open LuCI web UI → Services → Podkop Xray
+- 📋 Paste your VLESS+REALITY proxy string
+- 💾 Save & Apply, then start the service
 
-### Supported architectures
+### 🖥️ Supported architectures
 | Architecture | Devices |
 |---|---|
 | `aarch64` | Xiaomi AX3000T, most modern routers |
 | `x86_64` | x86 routers, VMs |
 | `armv7` | older ARM routers |
 
-### Requirements
+### ⚙️ Requirements
 - **OpenWrt 25.12+** (apk package manager)
 - ~15MB free space
 - Working internet connection
 
-## Features
+## ✨ Features
 
-- **VLESS + REALITY** — all transports (TCP, XHTTP, gRPC) with REALITY security
-- **XTLS-Vision** — TCP + REALITY with flow control for maximum performance
-- **XHTTP + REALITY** — xmux multiplexing + xPadding for DPI evasion
-- **gRPC + REALITY** — CDN-compatible transport with REALITY masking
-- **Mixed Proxy** — HTTP+SOCKS5 inbound on one port for manual proxy configuration
-- **FakeDNS** — transparent DNS-based routing via 198.18.0.0/15
-- **Selective routing** — route only specific domains/IPs through proxy
-- **Geosite routing** — 24 categories (dynamic from geosite.dat), proxy/direct/block per section
-- **GeoIP routing** — 11 categories (dynamic from geoip.dat), proxy/direct/block per section
-- **Rules Type** — configurable rule evaluation order with catch-all based on last word
-- **Router direct mode** — router's own traffic bypasses proxy by default (DHCP DNS)
-- **User lists** — manual domains/subnets via dynamic list or text with comments
-- **Remote/local lists** — domain/subnet lists from URLs or local files
-- **LuCI Web UI** — full web interface with diagnostics and geofiles release tracking
-- **SOCKS** — outbound for proxy chaining
+- 🛡️ **VLESS + REALITY** — all transports (TCP, XHTTP, gRPC) with REALITY security
+- ⚡ **XTLS-Vision** — TCP + REALITY with flow control for maximum performance
+- 🌊 **XHTTP + REALITY** — xmux multiplexing + xPadding for DPI evasion
+- 🔗 **gRPC + REALITY** — CDN-compatible transport with REALITY masking
+- 🔀 **Mixed Proxy** — HTTP+SOCKS5 inbound on one port for manual proxy configuration
+- 🎭 **FakeDNS** — transparent DNS-based routing via 198.18.0.0/15
+- 🎯 **Selective routing** — route only specific domains/IPs through proxy
+- 🌍 **Geosite routing** — 24 categories (dynamic from geosite.dat), proxy/direct/block per section
+- 🗺️ **GeoIP routing** — 11 categories (dynamic from geoip.dat), proxy/direct/block per section
+- 📐 **Rules Type** — configurable rule evaluation order with catch-all based on last word
+- 🏠 **Router direct mode** — router's own traffic bypasses proxy by default (DHCP DNS)
+- 📝 **User lists** — manual domains/subnets via dynamic list or text with comments
+- 📡 **Remote/local lists** — domain/subnet lists from URLs or local files
+- 🖥️ **LuCI Web UI** — full web interface with diagnostics and geofiles release tracking
+- 🧦 **SOCKS** — outbound for proxy chaining
 
-## How It Works
+## 🔍 How It Works
 
 ```
 LAN client -> dnsmasq -> Xray DNS (127.0.0.1:5300) -> FakeDNS (198.18.0.0/15)
@@ -71,7 +71,7 @@ Four layers work together:
 | 3 | **Xray-core** | dokodemo-door inbound, protocol handling, FakeDNS |
 | 4 | **dnsmasq** | Forward DNS queries to Xray DNS inbound |
 
-## Configuration
+## ⚙️ Configuration
 
 Edit `/etc/config/podkop-xray` or use LuCI web UI:
 
@@ -97,9 +97,29 @@ config section 'main'
         list geoip_direct 'RU-WHITELIST'
 ```
 
-### Proxy String Format
+### 🔑 Proxy String Format
 
 All VLESS connections use **REALITY** security for maximum DPI resistance:
+
+🛡️ **VLESS + XHTTP + REALITY + Fragment + Sudoku** — maximum DPI resistance, best setup as of March 2026 🔥🏆:
+```
+vless://UUID@server:443?type=xhttp&security=reality&pbk=KEY&sid=ID&sni=example.com&fp=chrome&path=/tunnel&mode=auto&fragment_length=10-50&fragment_delay=5-15&sudoku=mypassword
+```
+> 💡 `sudoku` password must match on client and server. Fragment breaks TLS ClientHello into small chunks, Sudoku transforms data patterns — together they defeat deep packet inspection.
+
+⚡ **VLESS + XHTTP + REALITY + Fragment** — TLS ClientHello fragmentation for DPI bypass:
+```
+vless://UUID@server:443?type=xhttp&security=reality&pbk=KEY&sid=ID&sni=example.com&fp=chrome&path=/tunnel&mode=auto&fragment_length=10-50&fragment_delay=5-15
+```
+
+📋 **Finalmask parameters:**
+
+| Parameter | Example | Description |
+|-----------|---------|-------------|
+| `fragment_length` | `10-50` | TLS ClientHello fragment size range (bytes) |
+| `fragment_delay` | `5-15` | Delay between fragments (ms) |
+| `fragment_packets` | `tlshello` | What to fragment (default: `tlshello`) |
+| `sudoku` | `mypassword` | Sudoku obfuscation password (must match server) |
 
 **VLESS + TCP + REALITY** (XTLS-Vision — golden standard):
 ```
@@ -121,7 +141,7 @@ vless://UUID@server:443?type=grpc&security=reality&pbk=KEY&sid=ID&sni=example.co
 socks://user:pass@127.0.0.1:1080
 ```
 
-### Rules Type
+### 📐 Rules Type
 
 Controls the order of geosite/geoip rule evaluation (first match wins). The last word determines the catch-all outbound for unmatched traffic:
 
@@ -131,7 +151,7 @@ Controls the order of geosite/geoip rule evaluation (first match wins). The last
 | `block_proxy_direct` | Block → Proxy → Direct (default) | direct |
 | `direct_proxy_block` | Direct → Proxy → Block | block |
 
-## Versioning
+## 🏷️ Versioning
 
 Version format: `0.<xray_version>-<build>`, e.g. `0.26.3.27-0`
 
@@ -140,7 +160,7 @@ Version format: `0.<xray_version>-<build>`, e.g. `0.26.3.27-0`
 
 GitHub tags: `v0.26.3.27-0`, `v0.26.3.27-1`, etc.
 
-## Building from source
+## 🔨 Building from source
 
 Requires Docker 20+.
 
@@ -154,14 +174,13 @@ Requires Docker 20+.
 
 See [docs/building-apk.md](docs/building-apk.md) for details.
 
-## CI/CD
+## 🤖 CI/CD
 
-Two GitHub Actions workflows:
+GitHub Actions workflow:
 
 | Workflow | Trigger | Action |
 |---|---|---|
 | `build-release.yml` | Tag push `v*` | Build APK + create GitHub release |
-| `update-geosite.yml` | Every 6h (cron) | Download, filter, release geosite.dat |
 
 To create a release:
 ```bash
@@ -169,7 +188,7 @@ git tag v0.26.3.27-0
 git push origin v0.26.3.27-0
 ```
 
-## CLI Usage
+## 🛠️ CLI Usage
 
 ```bash
 # Service management
@@ -187,7 +206,7 @@ podkop-xray list_geosite_categories  # List geosite.dat categories
 podkop-xray list_geoip_categories    # List geoip.dat categories
 ```
 
-## File Structure
+## 📁 File Structure
 
 ```
 podkop-xray/
@@ -197,7 +216,6 @@ podkop-xray/
     install.sh                          # One-line installer
     .github/workflows/
         build-release.yml               # CI: build APK + release on tag push
-        update-geosite.yml              # CI: update geosite.dat every 6h
     files/
         etc/
             config/podkop-xray          # UCI default configuration
@@ -213,16 +231,15 @@ podkop-xray/
                 xray_config.sh          # Xray JSON config generation
                 xhttp_parser.sh         # XHTTP URL parameter parsing
     luci-app-podkop-xray/               # LuCI web UI package
-    tools/                              # Geosite filtering scripts
     docs/                               # Documentation
 ```
 
-## Credits
+## 🙏 Credits
 
 - [podkop](https://github.com/itdoginfo/podkop) — original project by ITDog
 - [Xray-core](https://github.com/XTLS/Xray-core) — proxy platform with XHTTP
 - [russia-v2ray-rules-dat](https://github.com/runetfreedom/russia-v2ray-rules-dat) — geodata source
 
-## License
+## 📄 License
 
 GPL-2.0-or-later (same as podkop)
