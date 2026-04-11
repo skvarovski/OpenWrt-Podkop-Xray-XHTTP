@@ -73,24 +73,29 @@ jobs:
           fi
 
           XRAY_VER="${PKG_VERSION#0.}"
+          CORE_NAME=$(basename "$CORE_APK")
+          LUCI_NAME=$(basename "$LUCI_APK")
 
-          printf '%s\n' \
-            "## podkop-xray ${PKG_VERSION}-${PKG_BUILD}" \
-            "" \
-            "Selective domain routing for OpenWrt using Xray-core with XHTTP transport." \
-            "" \
-            "### Installation (one command)" \
-            '```sh' \
-            "wget -qO- https://raw.githubusercontent.com/${REPO_NAME}/main/install.sh | sh" \
-            '```' \
-            "" \
-            "### APK packages" \
-            "- \`$(basename "$CORE_APK")\` — core package" \
-            "- \`$(basename "$LUCI_APK")\` — LuCI web UI" \
-            "" \
-            "### Xray-core" \
-            "Requires xray-core ${XRAY_VER} (installed automatically by install.sh)" \
-            > /tmp/release-notes.md
+          echo "## podkop-xray ${PKG_VERSION}-${PKG_BUILD}" > /tmp/release-notes.md
+          echo "" >> /tmp/release-notes.md
+          echo "Selective domain routing for OpenWrt using Xray-core with XHTTP transport." >> /tmp/release-notes.md
+          echo "" >> /tmp/release-notes.md
+          echo "### Installation (one command)" >> /tmp/release-notes.md
+          echo "\`\`\`sh" >> /tmp/release-notes.md
+          echo "wget -qO- https://raw.githubusercontent.com/${REPO_NAME}/main/install.sh | sh" >> /tmp/release-notes.md
+          echo "\`\`\`" >> /tmp/release-notes.md
+          echo "" >> /tmp/release-notes.md
+          echo "### APK packages" >> /tmp/release-notes.md
+          echo "- \`${CORE_NAME}\` — core package" >> /tmp/release-notes.md
+          echo "- \`${LUCI_NAME}\` — LuCI web UI" >> /tmp/release-notes.md
+          echo "" >> /tmp/release-notes.md
+          echo "### Xray-core" >> /tmp/release-notes.md
+          echo "Requires xray-core ${XRAY_VER} (installed automatically by install.sh)" >> /tmp/release-notes.md
+
+          echo "=== Release notes ==="
+          cat /tmp/release-notes.md
+          echo "=== Creating release $TAG ==="
+          echo "APK files: $CORE_APK $LUCI_APK"
 
           gh release create "$TAG" \
             --title "podkop-xray ${PKG_VERSION}-${PKG_BUILD}" \
