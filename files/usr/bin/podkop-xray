@@ -1,0 +1,1084 @@
+#!/bin/ash
+
+check_required_file() {
+    local file="$1"
+
+    if [ ! -r "$file" ]; then
+        echo "Error: required file '$file' is missing or not readable" >&2
+        exit 1
+    fi
+}
+
+PODKOP_XRAY_LIB="/usr/lib/podkop-xray"
+check_required_file /lib/functions.sh
+check_required_file /lib/config/uci.sh
+check_required_file /lib/functions/network.sh
+check_required_file "$PODKOP_XRAY_LIB/constants.sh"
+check_required_file "$PODKOP_XRAY_LIB/logging.sh"
+check_required_file "$PODKOP_XRAY_LIB/helpers.sh"
+check_required_file "$PODKOP_XRAY_LIB/nft.sh"
+check_required_file "$PODKOP_XRAY_LIB/rulesets.sh"
+check_required_file "$PODKOP_XRAY_LIB/xray_config.sh"
+check_required_file "$PODKOP_XRAY_LIB/xhttp_parser.sh"
+
+. /lib/functions.sh
+. /lib/config/uci.sh
+. /lib/functions/network.sh
+. "$PODKOP_XRAY_LIB/constants.sh"
+. "$PODKOP_XRAY_LIB/logging.sh"
+. "$PODKOP_XRAY_LIB/helpers.sh"
+. "$PODKOP_XRAY_LIB/nft.sh"
+. "$PODKOP_XRAY_LIB/rulesets.sh"
+. "$PODKOP_XRAY_LIB/xray_config.sh"
+. "$PODKOP_XRAY_LIB/xhttp_parser.sh"
+
+config_load "$PODKOP_XRAY_CONFIG"
+
+# ─── Requirements check ──────────────────────────────────────────────────
+
+check_requirements() {
+    log "Check Requirements"
+
+    local xray_version jq_version
+    xray_version="$(xray version 2>/dev/null | head -n1 | awk '{print $2}')"
+    jq_version="$(jq --version | awk -F- '{print $2}')"
+
+    if [ -z "$xray_version" ]; then
+        log "Package 'xray-core' is not installed. Aborted." "error"
+        exit 1
+    fi
+
+    if [ -z "$jq_version" ]; then
+        log "Package 'jq' is not installed. Aborted." "error"
+        exit 1
+    elif ! is_min_package_version "$jq_version" "$JQ_REQUIRED_VERSION"; then
+        log "Package 'jq' version ($jq_version) is lower than the required minimum ($JQ_REQUIRED_VERSION). Aborted." "error"
+        exit 1
+    fi
+
+    if grep -qE 'doh_backup_noresolv|doh_backup_server|doh_server' /etc/config/dhcp; then
+        log "Detected https-dns-proxy in DHCP config. Edit /etc/config/dhcp" "error"
+    fi
+
+    if ! has_outbound_section; then
+        log "Outbound section not found. Please check your configuration (missing proxy_string). Aborted." "error"
+        exit 1
+    fi
+}
+
+_check_outbound_section() {
+    local section="$1"
+    local proxy_string interface outbound_json
+
+    config_get proxy_string "$section" "proxy_string"
+    config_get interface "$section" "interface"
+
+    if [ -n "$proxy_string" ] || [ -n "$interface" ]; then
+        section_exists=0
+    fi
+}
+
+has_outbound_section() {
+    local section_exists=1
+    config_foreach _check_outbound_section "section"
+    return $section_exists
+}
+
+# ─── Validation ──────────────────────────────────────────────────────────
+
+br_netfilter_disable() {
+    if lsmod | grep -q br_netfilter && [ "$(sysctl -n net.bridge.bridge-nf-call-iptables 2>/dev/null)" = "1" ]; then
+        log "br_netfilter enabled detected. Disabling"
+        sysctl -w net.bridge.bridge-nf-call-iptables=0
+        sysctl -w net.bridge.bridge-nf-call-ip6tables=0
+    fi
+}
+
+# ─── Xray config generation ─────────────────────────────────────────────
+
+# Collect geosite proxy/direct categories from a section (called via config_foreach)
+_collect_geosite_cats() {
+    local section="$1"
+
+    local cats
+    config_get cats "$section" "geosite_proxy"
+    if [ -n "$cats" ]; then
+        PROXY_GEOSITE_CATS="$PROXY_GEOSITE_CATS $cats"
+    fi
+
+    config_get cats "$section" "geosite_direct"
+    if [ -n "$cats" ]; then
+        DIRECT_GEOSITE_CATS="$DIRECT_GEOSITE_CATS $cats"
+    fi
+}
+
+xray_generate_config() {
+    log "Generating Xray configuration"
+
+    local config
+    config=$(xray_init_config)
+
+    # Log
+    local log_level
+    config_get log_level "settings" "log_level" "warning"
+    config=$(xray_configure_log "$config" "$log_level")
+
+    # FakeDNS
+    config=$(xray_configure_fakedns "$config")
+
+    # Collect geosite categories from all sections for DNS configuration
+    PROXY_GEOSITE_CATS=""
+    DIRECT_GEOSITE_CATS=""
+    config_foreach _collect_geosite_cats "section"
+
+    # DNS (category-aware: proxy cats → external DoH, direct cats → Yandex DoH)
+    local dns_type dns_server bootstrap_dns_server
+    config_get dns_type "settings" "dns_type" "doh"
+    config_get dns_server "settings" "dns_server" "https://dns.google/dns-query"
+    config_get bootstrap_dns_server "settings" "bootstrap_dns_server" "8.8.8.8"
+    config=$(xray_configure_dns "$config" "$dns_type" "$dns_server" "$bootstrap_dns_server" "$PROXY_GEOSITE_CATS" "$DIRECT_GEOSITE_CATS")
+
+    # Inbounds
+    config=$(xray_add_tproxy_inbound "$config" \
+        "$XRAY_TPROXY_INBOUND_TAG" "$XRAY_TPROXY_INBOUND_ADDRESS" "$XRAY_TPROXY_INBOUND_PORT")
+    config=$(xray_add_dns_inbound "$config" \
+        "$XRAY_DNS_INBOUND_TAG" "$XRAY_DNS_INBOUND_ADDRESS" "$XRAY_DNS_INBOUND_PORT" "$bootstrap_dns_server")
+
+    # Outbounds: first add proxy outbound(s) per section
+    config_foreach _generate_outbound "section"
+
+    # Determine primary outbound tag for routing (DNS, leak-tests → always proxy)
+    local primary_outbound_tag
+    primary_outbound_tag=$(get_outbound_tag_by_section "main")
+
+    # Determine catch-all outbound based on rules_type of main section
+    # Last word in rules_type = catch-all outbound (block_proxy_direct → direct)
+    local rules_type_main catchall_outbound_tag
+    config_get rules_type_main "main" "rules_type" "proxy_direct_block"
+    case "$rules_type_main" in
+    block_proxy_direct)
+        catchall_outbound_tag="$XRAY_DIRECT_OUTBOUND_TAG"
+        ;;
+    proxy_direct_block|direct_proxy_block)
+        catchall_outbound_tag="$XRAY_BLOCK_OUTBOUND_TAG"
+        ;;
+    *)
+        catchall_outbound_tag="$XRAY_BLOCK_OUTBOUND_TAG"
+        ;;
+    esac
+
+    # Standard outbounds
+    config=$(xray_add_direct_outbound "$config" "$XRAY_DIRECT_OUTBOUND_TAG")
+    config=$(xray_add_block_outbound "$config" "$XRAY_BLOCK_OUTBOUND_TAG")
+    config=$(xray_add_dns_outbound "$config" "$XRAY_DNS_OUTBOUND_TAG" "$primary_outbound_tag")
+
+    # Routing: base rules
+    config=$(xray_configure_routing "$config" "$primary_outbound_tag")
+
+    # Routing: per-section rules (community lists, user domains, etc.)
+    local http_proxy_address download_lists_via_proxy
+    config_get download_lists_via_proxy "settings" "download_lists_via_proxy" "0"
+    if [ "$download_lists_via_proxy" = "1" ]; then
+        http_proxy_address="127.0.0.1:4534"
+    fi
+
+    config_foreach _generate_routing_rules "section"
+
+    # QUIC → block (force TCP fallback, QUIC sniffing unreliable via tproxy)
+    local disable_quic
+    config_get_bool disable_quic "settings" "disable_quic" 0
+    if [ "$disable_quic" -eq 1 ]; then
+        config=$(echo "$config" | jq \
+            --arg tag "$XRAY_BLOCK_OUTBOUND_TAG" \
+            '.routing.rules += [{
+                type: "field",
+                protocol: ["quic"],
+                outboundTag: $tag
+            }]')
+        log "QUIC disabled: protocol quic → block"
+    fi
+
+    # BitTorrent → direct (prevent proxy abuse)
+    config=$(echo "$config" | jq \
+        --arg tag "$XRAY_DIRECT_OUTBOUND_TAG" \
+        '.routing.rules += [{
+            type: "field",
+            protocol: ["bittorrent"],
+            outboundTag: $tag
+        }]')
+
+    # geoip:ru-blocked disabled — geoip.dat too large for low-RAM routers
+    # IP-based blocking handled by geosite domain matching + FakeDNS
+
+    # Leak-test and IP-check domains → proxy (for diagnostics)
+    config=$(xray_add_domain_routing_rule "$config" \
+        '["dnsleaktest.com","ipleak.net","browserleaks.com","whoer.net","2ip.ru","api.ipify.org"]' \
+        "$primary_outbound_tag")
+
+    # Final catch-all rule: determined by rules_type (last word = catch-all outbound)
+    config=$(xray_add_catchall_routing_rule "$config" "$catchall_outbound_tag")
+
+    echo "$config"
+}
+
+# Generate outbound for a section
+_generate_outbound() {
+    local section="$1"
+
+    local connection_type proxy_config_type proxy_string
+    config_get connection_type "$section" "connection_type"
+
+    case "$connection_type" in
+    proxy)
+        config_get proxy_config_type "$section" "proxy_config_type" "url"
+
+        case "$proxy_config_type" in
+        url)
+            config_get proxy_string "$section" "proxy_string"
+            if [ -z "$proxy_string" ]; then
+                log "Proxy string is not set for section $section. Aborted." "fatal"
+                exit 1
+            fi
+            local outbound_tag
+            outbound_tag=$(get_outbound_tag_by_section "$section")
+            config=$(xray_add_proxy_outbound_from_url "$config" "$outbound_tag" "$proxy_string")
+
+            # SOCKS5 + HTTP proxy inbounds
+            local mixed_proxy_enabled socks_proxy_port http_proxy_port
+            config_get_bool mixed_proxy_enabled "$section" "mixed_proxy_enabled" 1
+            if [ "$mixed_proxy_enabled" -eq 1 ]; then
+                config_get socks_proxy_port "$section" "socks_proxy_port" "10808"
+                config_get http_proxy_port "$section" "http_proxy_port" "10809"
+                local listen_address
+                listen_address=$(get_service_listen_address)
+                config=$(xray_add_socks_inbound "$config" \
+                    "${section}-socks-in" "$listen_address" "$socks_proxy_port" "$outbound_tag")
+                config=$(xray_add_http_inbound "$config" \
+                    "${section}-http-in" "$listen_address" "$http_proxy_port" "$outbound_tag")
+                log "SOCKS5 proxy on $listen_address:$socks_proxy_port, HTTP proxy on $listen_address:$http_proxy_port"
+            fi
+            ;;
+        *)
+            log "Unsupported proxy_config_type: $proxy_config_type" "error"
+            ;;
+        esac
+        ;;
+    block|exclusion)
+        log "Connection type '$connection_type' for section $section — handled via routing rules"
+        ;;
+    *)
+        log "Unknown connection type '$connection_type' for section $section" "error"
+        ;;
+    esac
+}
+
+# Generate routing rules for a section
+_generate_routing_rules() {
+    local section="$1"
+
+    local connection_type outbound_tag
+    config_get connection_type "$section" "connection_type"
+
+    case "$connection_type" in
+    proxy)
+        outbound_tag=$(get_outbound_tag_by_section "$section")
+        ;;
+    block)
+        outbound_tag="$XRAY_BLOCK_OUTBOUND_TAG"
+        ;;
+    exclusion)
+        outbound_tag="$XRAY_DIRECT_OUTBOUND_TAG"
+        ;;
+    vpn)
+        log "VPN routing not yet implemented" "warn"
+        return
+        ;;
+    *)
+        return
+        ;;
+    esac
+
+    # Rules Type determines the order of geosite/geoip rule evaluation
+    local rules_type
+    config_get rules_type "$section" "rules_type" "proxy_direct_block"
+
+    case "$rules_type" in
+    proxy_direct_block)
+        config=$(process_geosite_proxy "$config" "$section" "$outbound_tag")
+        config=$(process_geoip_proxy "$config" "$section" "$outbound_tag")
+        config=$(process_geosite_direct "$config" "$section")
+        config=$(process_geoip_direct "$config" "$section")
+        config=$(process_geosite_block "$config" "$section")
+        config=$(process_geoip_block "$config" "$section")
+        ;;
+    block_proxy_direct)
+        config=$(process_geosite_block "$config" "$section")
+        config=$(process_geoip_block "$config" "$section")
+        config=$(process_geosite_proxy "$config" "$section" "$outbound_tag")
+        config=$(process_geoip_proxy "$config" "$section" "$outbound_tag")
+        config=$(process_geosite_direct "$config" "$section")
+        config=$(process_geoip_direct "$config" "$section")
+        ;;
+    direct_proxy_block)
+        config=$(process_geosite_direct "$config" "$section")
+        config=$(process_geoip_direct "$config" "$section")
+        config=$(process_geosite_proxy "$config" "$section" "$outbound_tag")
+        config=$(process_geoip_proxy "$config" "$section" "$outbound_tag")
+        config=$(process_geosite_block "$config" "$section")
+        config=$(process_geoip_block "$config" "$section")
+        ;;
+    *)
+        # Default: proxy → direct → block
+        config=$(process_geosite_proxy "$config" "$section" "$outbound_tag")
+        config=$(process_geoip_proxy "$config" "$section" "$outbound_tag")
+        config=$(process_geosite_direct "$config" "$section")
+        config=$(process_geoip_direct "$config" "$section")
+        config=$(process_geosite_block "$config" "$section")
+        config=$(process_geoip_block "$config" "$section")
+        ;;
+    esac
+
+    # Remote domain lists (URLs to plain text domain files → Xray routing)
+    config=$(process_remote_domain_lists "$config" "$section" "$outbound_tag" "$http_proxy_address")
+
+    # Remote subnet lists (URLs to plain text subnet files → nftables set)
+    process_remote_subnet_lists "$section" "$http_proxy_address"
+
+    # Local domain lists (file paths on router → Xray routing)
+    config=$(process_local_domain_lists "$config" "$section" "$outbound_tag")
+
+    # Local subnet lists (file paths on router → nftables set)
+    process_local_subnet_lists "$section"
+
+    # User-defined domains (UCI list → Xray routing)
+    config=$(process_user_domains "$config" "$section" "$outbound_tag")
+
+    # User-defined subnets (UCI list → nftables set)
+    process_user_subnets "$section"
+
+    # Fully routed IPs — all traffic from these source IPs goes through proxy
+    local fully_routed_ips
+    config_get fully_routed_ips "$section" "fully_routed_ips"
+    if [ -n "$fully_routed_ips" ]; then
+        local ips_json
+        ips_json=$(echo "$fully_routed_ips" | tr ' ' '\n' | jq -R . | jq -s .)
+        config=$(echo "$config" | jq \
+            --argjson ips "$ips_json" \
+            --arg tag "$outbound_tag" \
+            '.routing.rules += [{
+                type: "field",
+                source: $ips,
+                outboundTag: $tag
+            }]')
+        log "Added fully routed IPs: $fully_routed_ips"
+    fi
+}
+
+# Save config to file
+xray_save_config() {
+    local config="$1"
+    local config_path="$2"
+
+    local config_dir
+    config_dir=$(dirname "$config_path")
+    mkdir -p "$config_dir"
+
+    echo "$config" | jq '.' > "$config_path"
+
+    if [ $? -ne 0 ]; then
+        log "Failed to write Xray config to $config_path" "error"
+        exit 1
+    fi
+
+    log "Xray config saved to $config_path"
+}
+
+# ─── Cron ────────────────────────────────────────────────────────────────
+
+add_cron_job() {
+    local _section="$1"  # unused, required by config_foreach
+    local update_interval
+    config_get update_interval "settings" "update_interval"
+
+    local cron_job
+    case "$update_interval" in
+    "1h")  cron_job="0 * * * * /usr/bin/podkop-xray list_update" ;;
+    "3h")  cron_job="0 */3 * * * /usr/bin/podkop-xray list_update" ;;
+    "12h") cron_job="0 */12 * * * /usr/bin/podkop-xray list_update" ;;
+    "1d")  cron_job="0 1 * * * /usr/bin/podkop-xray list_update" ;;
+    "3d")  cron_job="0 1 */3 * * /usr/bin/podkop-xray list_update" ;;
+    *)
+        log "Invalid update_interval value: $update_interval"
+        return
+        ;;
+    esac
+
+    remove_cron_job
+    crontab -l 2>/dev/null | {
+        cat
+        echo "$cron_job"
+    } | crontab -
+    log "Cron job created: $cron_job"
+}
+
+remove_cron_job() {
+    (crontab -l | grep -v "/usr/bin/podkop-xray list_update") | crontab -
+    log "Cron job removed"
+}
+
+# ─── List update ─────────────────────────────────────────────────────────
+
+list_update() {
+    echolog "Starting lists update..."
+
+    local nslookup_timeout=3
+    local nslookup_attempts=10
+    local delay=3
+    local i
+    local dns_ok=0
+
+    # DNS Check
+    for i in $(seq 1 $nslookup_attempts); do
+        if nslookup -timeout=$nslookup_timeout openwrt.org > /dev/null 2>&1; then
+            echolog "DNS check passed"
+            dns_ok=1
+            break
+        fi
+        echolog "DNS is unavailable [$i/$nslookup_attempts]"
+        sleep $delay
+    done
+
+    if [ "$dns_ok" = "0" ]; then
+        echolog "DNS unavailable after $nslookup_attempts attempts, aborting update"
+        return 1
+    fi
+
+    # Update geosite.dat
+    local http_proxy_address=""
+    local download_via_proxy
+    config_get download_via_proxy "settings" "download_lists_via_proxy" "0"
+    if [ "$download_via_proxy" = "1" ]; then
+        local listen_ip socks_port
+        listen_ip=$(ip -4 addr show br-lan 2>/dev/null | grep -oE 'inet [0-9.]+' | awk '{print $2}' | head -1)
+        config_get socks_port "main" "socks_proxy_port" "10808"
+        [ -n "$listen_ip" ] && http_proxy_address="${listen_ip}:${socks_port}"
+    fi
+
+    if ! update_geofiles "$TMP_GEOFILES_FOLDER" "$http_proxy_address"; then
+        echolog "No geofiles updated, skipping restart"
+        return 0
+    fi
+
+    # Re-generate config with fresh lists
+    local config_path
+    config_get config_path "settings" "config_path" "/etc/xray/config.json"
+
+    local config
+    config=$(xray_generate_config)
+    if [ -z "$config" ] || [ "$config" = "{}" ]; then
+        echolog "Config generation failed, aborting restart"
+        return 1
+    fi
+
+    xray_save_config "$config" "$config_path"
+
+    # Full restart to rebuild nftables (new subnets from remote lists)
+    stop_main
+    start_main
+
+    echolog "Lists update completed successfully"
+}
+
+# ─── Xray process management ────────────────────────────────────────────
+
+xray_start() {
+    local config_path="$1"
+
+    log "Starting Xray"
+
+    # Set XRAY_LOCATION_ASSET for geoip/geosite
+    export XRAY_LOCATION_ASSET="$TMP_GEOFILES_FOLDER"
+
+    xray run -c "$config_path" &
+    echo $! > /var/run/podkop-xray.pid
+
+    log "Xray started with PID $(cat /var/run/podkop-xray.pid)"
+}
+
+xray_stop() {
+    log "Stopping Xray"
+
+    if [ -f /var/run/podkop-xray.pid ]; then
+        local pid
+        pid=$(cat /var/run/podkop-xray.pid)
+        if kill -0 "$pid" 2>/dev/null; then
+            kill "$pid" 2>/dev/null
+            # Wait for graceful shutdown
+            local i=0
+            while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 10 ]; do
+                sleep 1
+                i=$((i + 1))
+            done
+            if kill -0 "$pid" 2>/dev/null; then
+                kill -9 "$pid" 2>/dev/null
+            fi
+        fi
+        rm -f /var/run/podkop-xray.pid
+    fi
+
+    # Also kill any stray xray processes started by us
+    killall xray 2>/dev/null
+}
+
+xray_restart() {
+    local config_path
+    config_get config_path "settings" "config_path" "/etc/xray/config.json"
+
+    xray_stop
+    sleep 1
+    xray_start "$config_path"
+}
+
+# ─── Main entry points ──────────────────────────────────────────────────
+
+start_main() {
+    log "Starting podkop-xray"
+
+    check_requirements
+
+    br_netfilter_disable
+
+    # Sync time for TLS/DoH
+    /usr/sbin/ntpd -q -p 194.190.168.1 -p 216.239.35.0 -p 216.239.35.4 -p 162.159.200.1 -p 162.159.200.123 2>/dev/null
+
+    sleep 1
+
+    mkdir -p "$TMP_XRAY_FOLDER"
+    mkdir -p "$TMP_GEOFILES_FOLDER"
+    mkdir -p "$TMP_LISTS_FOLDER"
+
+    # Download geofiles
+    local http_proxy_address download_lists_via_proxy
+    config_get download_lists_via_proxy "settings" "download_lists_via_proxy" "0"
+    if [ "$download_lists_via_proxy" = "1" ]; then
+        http_proxy_address="127.0.0.1:4534"
+    fi
+    download_geofiles "$TMP_GEOFILES_FOLDER" "$http_proxy_address"
+
+    # Network setup
+    route_table_setup
+    create_nft_rules
+
+    # Generate and save Xray config
+    local config_path
+    config_get config_path "settings" "config_path" "/etc/xray/config.json"
+
+    local config
+    config=$(xray_generate_config)
+    xray_save_config "$config" "$config_path"
+
+    # Start Xray
+    xray_start "$config_path"
+
+    # Cron
+    config_foreach add_cron_job "section"
+
+    log "podkop-xray started successfully"
+}
+
+stop_main() {
+    log "Stopping podkop-xray"
+
+    # Kill list update if running
+    if [ -f /var/run/podkop-xray_list_update.pid ]; then
+        local pid
+        pid=$(cat /var/run/podkop-xray_list_update.pid)
+        if kill -0 "$pid" 2>/dev/null; then
+            kill "$pid" 2>/dev/null
+        fi
+        rm -f /var/run/podkop-xray_list_update.pid
+    fi
+
+    remove_cron_job
+
+    rm -f "$TMP_LISTS_FOLDER"/*
+
+    log "Flush nft"
+    destroy_nft_rules
+
+    log "Flush ip rule and route"
+    route_table_cleanup
+
+    log "Stop Xray"
+    xray_stop
+}
+
+start() {
+    start_main
+
+    config_get_bool dont_touch_dhcp "settings" "dont_touch_dhcp" 0
+    if [ "$dont_touch_dhcp" -eq 0 ]; then
+        dnsmasq_configure
+    fi
+    resolv_conf_configure
+
+    uci_set "podkop-xray" "settings" "shutdown_correctly" 0
+    uci commit "podkop-xray" && config_load "$PODKOP_XRAY_CONFIG"
+}
+
+stop() {
+    local dont_touch_dhcp
+    resolv_conf_restore
+    config_get_bool dont_touch_dhcp "settings" "dont_touch_dhcp" 0
+    if [ "$dont_touch_dhcp" -eq 0 ]; then
+        dnsmasq_restore
+    fi
+
+    stop_main
+
+    uci_set "podkop-xray" "settings" "shutdown_correctly" 1
+    uci commit "podkop-xray" && config_load "$PODKOP_XRAY_CONFIG"
+}
+
+reload() {
+    log "podkop-xray reload"
+    stop_main
+    start_main
+}
+
+restart() {
+    log "podkop-xray restart"
+    stop
+    start
+}
+
+# ─── Diagnostic commands ─────────────────────────────────────────────────
+
+check_xray() {
+    local xray_installed=0 xray_version_ok=0 xray_service_exist=0
+    local xray_process_running=0 xray_ports_listening=0
+
+    if command -v xray >/dev/null 2>&1; then
+        xray_installed=1
+    fi
+
+    local xray_version
+    xray_version="$(xray version 2>/dev/null | head -n1 | awk '{print $2}')"
+    if [ -n "$xray_version" ] && is_min_package_version "$xray_version" "$XRAY_REQUIRED_VERSION"; then
+        xray_version_ok=1
+    fi
+
+    if [ -f /etc/init.d/podkop-xray ]; then
+        xray_service_exist=1
+    fi
+
+    if pgrep -f "xray run" >/dev/null 2>&1; then
+        xray_process_running=1
+    fi
+
+    if netstat -ln 2>/dev/null | grep -q ":${XRAY_DNS_INBOUND_PORT} " && \
+       netstat -ln 2>/dev/null | grep -q ":${XRAY_TPROXY_INBOUND_PORT} "; then
+        xray_ports_listening=1
+    fi
+
+    printf '{"xray_installed":%d,"xray_version_ok":%d,"xray_service_exist":%d,"xray_process_running":%d,"xray_ports_listening":%d}\n' \
+        "$xray_installed" "$xray_version_ok" "$xray_service_exist" \
+        "$xray_process_running" "$xray_ports_listening"
+}
+
+get_xray_status() {
+    local running=0 enabled=0 dns_configured=0
+
+    if pgrep -f "xray run" >/dev/null 2>&1; then
+        running=1
+    fi
+
+    if [ -x /etc/rc.d/S99podkop-xray ]; then
+        enabled=1
+    fi
+
+    if grep -q "server=${XRAY_DNS_INBOUND_ADDRESS}#${XRAY_DNS_INBOUND_PORT}" /tmp/dnsmasq.d/* /var/etc/dnsmasq.conf* 2>/dev/null; then
+        dns_configured=1
+    fi
+
+    printf '{"running":%d,"enabled":%d,"dns_configured":%d}\n' "$running" "$enabled" "$dns_configured"
+}
+
+show_xray_config() {
+    local config_path
+    config_get config_path "settings" "config_path" "/etc/xray/config.json"
+
+    if [ ! -f "$config_path" ]; then
+        echo '{"error":"Config file not found"}'
+        return 1
+    fi
+
+    jq '
+        walk(if type == "object" then
+            with_entries(
+                if .key == "id" or .key == "password" or .key == "publicKey" or
+                   .key == "shortId" or .key == "fingerprint" or .key == "serverName"
+                then .value = "***"
+                else . end
+            )
+        else . end)
+    ' "$config_path"
+}
+
+check_nft_rules() {
+    local table_exist=0 rules_mangle_exist=0 rules_mangle_counters=0
+    local rules_mangle_output_exist=0 rules_mangle_output_counters=0
+    local rules_proxy_exist=0 rules_proxy_counters=0 rules_other_mark_exist=0
+
+    if nft list table inet "$NFT_TABLE_NAME" >/dev/null 2>&1; then
+        table_exist=1
+    fi
+
+    # Generate traffic to activate counters
+    curl -s -m 3 "https://ip.podkop.fyi/check" >/dev/null 2>&1 &
+    curl -s -m 3 "https://fakeip.podkop.fyi/check" >/dev/null 2>&1 &
+    wait
+
+    local mangle_output
+    mangle_output=$(nft list chain inet "$NFT_TABLE_NAME" mangle 2>/dev/null)
+    if [ -n "$mangle_output" ]; then
+        rules_mangle_exist=1
+        if echo "$mangle_output" | grep -q "counter packets [1-9]"; then
+            rules_mangle_counters=1
+        fi
+    fi
+
+    local mangle_output_output
+    mangle_output_output=$(nft list chain inet "$NFT_TABLE_NAME" mangle_output 2>/dev/null)
+    if [ -n "$mangle_output_output" ]; then
+        rules_mangle_output_exist=1
+        if echo "$mangle_output_output" | grep -q "counter packets [1-9]"; then
+            rules_mangle_output_counters=1
+        fi
+    fi
+
+    local proxy_output
+    proxy_output=$(nft list chain inet "$NFT_TABLE_NAME" proxy 2>/dev/null)
+    if [ -n "$proxy_output" ]; then
+        rules_proxy_exist=1
+        if echo "$proxy_output" | grep -q "counter packets [1-9]"; then
+            rules_proxy_counters=1
+        fi
+    fi
+
+    # Check for conflicting marks in other tables (exclude our table entirely)
+    local other_mark_output
+    other_mark_output=$(nft list tables 2>/dev/null | grep -v "$NFT_TABLE_NAME" | while read -r _type family tname; do
+        nft list table "$family" "$tname" 2>/dev/null
+    done)
+    if echo "$other_mark_output" | grep -q "meta mark set"; then
+        rules_other_mark_exist=1
+    fi
+
+    printf '{"table_exist":%d,"rules_mangle_exist":%d,"rules_mangle_counters":%d,"rules_mangle_output_exist":%d,"rules_mangle_output_counters":%d,"rules_proxy_exist":%d,"rules_proxy_counters":%d,"rules_other_mark_exist":%d}\n' \
+        "$table_exist" "$rules_mangle_exist" "$rules_mangle_counters" \
+        "$rules_mangle_output_exist" "$rules_mangle_output_counters" \
+        "$rules_proxy_exist" "$rules_proxy_counters" "$rules_other_mark_exist"
+}
+
+check_dns_available() {
+    local dns_type dns_server bootstrap_dns_server
+    config_get dns_type "settings" "dns_type" "doh"
+    config_get dns_server "settings" "dns_server" "https://dns.google/dns-query"
+    config_get bootstrap_dns_server "settings" "bootstrap_dns_server" "8.8.8.8"
+
+    local dns_status=0 dns_on_router=0 bootstrap_dns_status=0 dhcp_config_status=0
+
+    # Test configured DNS
+    case "$dns_type" in
+    doh)
+        # OpenWrt bind-dig doesn't support +https, use curl for DoH
+        # Extract host from DoH URL for JSON API fallback
+        local doh_url="$dns_server"
+        echo "$doh_url" | grep -q "^https://" || doh_url="https://$doh_url/dns-query"
+        local doh_host
+        doh_host=$(echo "$doh_url" | sed 's|https://||;s|/.*||')
+        # Try JSON API first (works with Google, Cloudflare, etc.)
+        if curl -s -m 3 "https://${doh_host}/resolve?name=google.com&type=A" -H 'accept: application/dns-json' 2>/dev/null | grep -q '"Answer"'; then
+            dns_status=1
+        elif curl -s -m 3 "https://${doh_host}/dns-query?name=google.com&type=A" -H 'accept: application/dns-json' 2>/dev/null | grep -q '"Answer"'; then
+            dns_status=1
+        fi
+        ;;
+    dot) dig +tls @"$dns_server" google.com +short +time=3 >/dev/null 2>&1 && dns_status=1 ;;
+    udp) dig @"$dns_server" google.com +short +time=3 >/dev/null 2>&1 && dns_status=1 ;;
+    esac
+
+    # Test local DNS
+    if dig @127.0.0.1 google.com +short +time=3 >/dev/null 2>&1; then
+        dns_on_router=1
+    fi
+
+    # Test bootstrap DNS
+    if dig @"$bootstrap_dns_server" google.com +short +time=3 >/dev/null 2>&1; then
+        bootstrap_dns_status=1
+    fi
+
+    # Check dnsmasq config (UCI generates to /var/etc/dnsmasq.conf*, some setups use /tmp/dnsmasq.d/)
+    if grep -q "server=${XRAY_DNS_INBOUND_ADDRESS}#${XRAY_DNS_INBOUND_PORT}" /tmp/dnsmasq.d/* /var/etc/dnsmasq.conf* 2>/dev/null; then
+        dhcp_config_status=1
+    fi
+
+    printf '{"dns_type":"%s","dns_server":"%s","dns_status":%d,"dns_on_router":%d,"bootstrap_dns_server":"%s","bootstrap_dns_status":%d,"dhcp_config_status":%d}\n' \
+        "$dns_type" "$dns_server" "$dns_status" "$dns_on_router" \
+        "$bootstrap_dns_server" "$bootstrap_dns_status" "$dhcp_config_status"
+}
+
+check_proxy() {
+    # Check proxy connectivity and measure response time via SOCKS5
+    local socks_port
+    local proxy_ip=""
+    local direct_ip=""
+    local proxy_time_ms=0
+    local proxy_reachable=false
+
+    config_load podkop-xray
+    config_get socks_port "main" "socks_proxy_port" "10808"
+
+    local listen_ip
+    listen_ip=$(ip -4 addr show br-lan 2>/dev/null | grep -oE 'inet [0-9.]+' | awk '{print $2}' | head -1)
+    [ -z "$listen_ip" ] && listen_ip="127.0.0.1"
+
+    # Measure proxy response time using curl's built-in timing
+    local curl_output
+    curl_output=$(curl -4 -m 10 -s -w '\n%{time_total}' --socks5-hostname "$listen_ip:$socks_port" "https://api.ipify.org" 2>/dev/null)
+
+    if [ -n "$curl_output" ]; then
+        proxy_ip=$(echo "$curl_output" | head -1)
+        local time_total
+        time_total=$(echo "$curl_output" | tail -1)
+        if [ -n "$proxy_ip" ] && [ -n "$time_total" ]; then
+            proxy_reachable=true
+            # Convert seconds to ms: remove dot, handle as integer
+            proxy_time_ms=$(echo "$time_total" | awk '{printf "%d", $1 * 1000}')
+        fi
+    fi
+
+    # Get direct IP bypassing FakeIP: resolve via bootstrap DNS, connect to real IP
+    local real_target_ip
+    real_target_ip=$(nslookup api.ipify.org 8.8.8.8 2>/dev/null | grep -E "^Address:" | tail -1 | awk '{print $2}')
+    if [ -n "$real_target_ip" ]; then
+        direct_ip=$(curl -4 -m 3 -s --resolve "api.ipify.org:443:$real_target_ip" "https://api.ipify.org" 2>/dev/null)
+    fi
+
+    local ip_different=false
+    if [ -n "$proxy_ip" ] && [ -n "$direct_ip" ] && [ "$proxy_ip" != "$direct_ip" ]; then
+        ip_different=true
+    fi
+
+    printf '{"proxy_reachable":%s,"proxy_time_ms":%d,"proxy_ip":"%s","direct_ip":"%s","ip_different":%s}\n' \
+        "$proxy_reachable" "$proxy_time_ms" "$proxy_ip" "$direct_ip" "$ip_different"
+}
+
+check_fakeip() {
+    # Check if router DNS resolves a known external domain to FakeIP range (198.18.0.0/15)
+    local test_domain="fakeip.podkop.fyi"
+    local resolved_ip
+    resolved_ip=$(nslookup "$test_domain" 127.0.0.1 2>/dev/null | grep -E "^Address:" | tail -1 | awk '{print $2}')
+
+    local fakeip=false
+    if [ -n "$resolved_ip" ]; then
+        # Check if IP is in 198.18.0.0/15 (198.18.x.x or 198.19.x.x)
+        case "$resolved_ip" in
+            198.18.*|198.19.*) fakeip=true ;;
+        esac
+    fi
+
+    # Also check connectivity through proxy by fetching external IP
+    local proxy_ip=""
+    proxy_ip=$(curl -4 -m 3 -s "https://api.ipify.org" 2>/dev/null)
+
+    printf '{"fakeip":%s,"IP":"%s","resolved":"%s"}\n' "$fakeip" "$proxy_ip" "$resolved_ip"
+}
+
+check_logs() {
+    local logs
+    logs=$(logread 2>/dev/null | grep -E "podkop-xray|xray")
+    local start_line
+    start_line=$(echo "$logs" | grep -n "Starting podkop-xray" | tail -n1 | cut -d: -f1)
+    if [ -n "$start_line" ]; then
+        echo "$logs" | tail -n +"$start_line"
+    else
+        echo "$logs" | tail -n 100
+    fi
+}
+
+get_status() {
+    local enabled=0
+    if [ -x /etc/rc.d/S99podkop-xray ]; then
+        enabled=1
+    fi
+    printf '{"enabled":%d}\n' "$enabled"
+}
+
+get_system_info() {
+    local xray_version openwrt_version device_model geofiles_release geosite_status geoip_status
+
+    xray_version="$(xray version 2>/dev/null | head -n1 | awk '{print $2}')"
+    [ -z "$xray_version" ] && xray_version="not installed"
+
+    openwrt_version="$(. /etc/os-release 2>/dev/null && echo "$OPENWRT_RELEASE")"
+    [ -z "$openwrt_version" ] && openwrt_version="unknown"
+
+    device_model="$(cat /tmp/sysinfo/model 2>/dev/null)"
+    [ -z "$device_model" ] && device_model="unknown"
+
+    geofiles_release="$(get_geofiles_release_tag)"
+    [ -z "$geofiles_release" ] && geofiles_release="not downloaded"
+
+    [ -f "$TMP_GEOFILES_FOLDER/geosite.dat" ] && geosite_status="ok" || geosite_status="missing"
+    [ -f "$TMP_GEOFILES_FOLDER/geoip.dat" ] && geoip_status="ok" || geoip_status="missing"
+
+    printf '{"podkop_xray_version":"%s","xray_version":"%s","openwrt_version":"%s","device_model":"%s","geofiles_release":"%s","geosite_status":"%s","geoip_status":"%s"}\n' \
+        "$PODKOP_XRAY_VERSION" "$xray_version" "$openwrt_version" "$device_model" "$geofiles_release" "$geosite_status" "$geoip_status"
+}
+
+show_config() {
+    if [ -f "$PODKOP_XRAY_CONFIG" ]; then
+        sed -e "s/\(proxy_string\s*'\)[^']*/\1***/g" \
+            -e "s/\(proxy_string\s*\"\)[^\"]*/\1***/g" \
+            "$PODKOP_XRAY_CONFIG"
+    else
+        echo "Config file not found: $PODKOP_XRAY_CONFIG"
+    fi
+}
+
+show_version() {
+    echo "$PODKOP_XRAY_VERSION"
+}
+
+list_geosite_categories() {
+    local cat_file="$TMP_GEOFILES_FOLDER/geosite_categories.txt"
+    if [ -f "$cat_file" ] && [ -s "$cat_file" ]; then
+        cat "$cat_file" | grep -v '^$' | sort -u
+        return
+    fi
+    # Fallback: extract from geosite.dat via strings
+    local geosite_file="$TMP_GEOFILES_FOLDER/geosite.dat"
+    if [ ! -f "$geosite_file" ]; then
+        echo ""
+        return
+    fi
+    strings "$geosite_file" | grep -E '^[A-Z][A-Z0-9_-]+$' | sort -u
+}
+
+list_geoip_categories() {
+    local cat_file="$TMP_GEOFILES_FOLDER/geoip_categories.txt"
+    if [ -f "$cat_file" ] && [ -s "$cat_file" ]; then
+        cat "$cat_file" | grep -v '^$' | sort -u
+        return
+    fi
+    # Fallback: use hardcoded constant
+    if [ ! -f "$TMP_GEOFILES_FOLDER/geoip.dat" ]; then
+        echo ""
+        return
+    fi
+    echo "$GEOIP_CATEGORIES_FALLBACK" | tr ' ' '\n' | sort
+}
+
+global_check() {
+    echo "=== System Info ==="
+    get_system_info
+    echo ""
+    echo "=== Service Status ==="
+    get_status
+    echo ""
+    echo "=== Xray Status ==="
+    check_xray
+    echo ""
+    echo "=== Xray Runtime ==="
+    get_xray_status
+    echo ""
+    echo "=== DNS Check ==="
+    check_dns_available
+    echo ""
+    echo "=== NFT Rules ==="
+    check_nft_rules
+    echo ""
+    echo "=== FakeIP ==="
+    check_fakeip
+    echo ""
+    echo "=== Config ==="
+    show_config
+}
+
+# ─── CLI ─────────────────────────────────────────────────────────────────
+
+case "$1" in
+start)
+    start
+    ;;
+stop)
+    stop
+    ;;
+restart)
+    restart
+    ;;
+reload)
+    reload
+    ;;
+list_update)
+    list_update
+    ;;
+generate_config)
+    config=$(xray_generate_config)
+    echo "$config" | jq '.'
+    ;;
+check_xray)
+    check_xray
+    ;;
+get_xray_status)
+    get_xray_status
+    ;;
+show_xray_config)
+    show_xray_config
+    ;;
+check_nft_rules)
+    check_nft_rules
+    ;;
+check_dns_available)
+    check_dns_available
+    ;;
+check_proxy)
+    check_proxy
+    ;;
+check_fakeip)
+    check_fakeip
+    ;;
+check_logs)
+    check_logs
+    ;;
+get_status)
+    get_status
+    ;;
+get_system_info)
+    get_system_info
+    ;;
+show_config)
+    show_config
+    ;;
+show_version)
+    show_version
+    ;;
+global_check)
+    global_check
+    ;;
+list_geosite_categories)
+    list_geosite_categories
+    ;;
+list_geoip_categories)
+    list_geoip_categories
+    ;;
+*)
+    echo "Usage: $0 {start|stop|restart|reload|list_update|generate_config}"
+    echo "       $0 {check_xray|get_xray_status|show_xray_config|check_nft_rules}"
+    echo "       $0 {check_dns_available|check_fakeip|check_logs|get_status}"
+    echo "       $0 {get_system_info|show_config|show_version|global_check}"
+    exit 1
+    ;;
+esac
