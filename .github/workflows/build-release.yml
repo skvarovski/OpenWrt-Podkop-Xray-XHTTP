@@ -74,25 +74,27 @@ jobs:
 
           XRAY_VER="${PKG_VERSION#0.}"
 
+          NOTES=$(cat <<EOF
+## podkop-xray ${PKG_VERSION}-${PKG_BUILD}
+
+Selective domain routing for OpenWrt using Xray-core with XHTTP transport.
+
+### Installation (one command)
+\`\`\`sh
+wget -qO- https://raw.githubusercontent.com/${REPO_NAME}/main/install.sh | sh
+\`\`\`
+
+### APK packages
+- \`$(basename "$CORE_APK")\` — core package
+- \`$(basename "$LUCI_APK")\` — LuCI web UI
+
+### Xray-core
+Requires xray-core ${XRAY_VER} (installed automatically by install.sh)
+EOF
+          )
+
           gh release create "$TAG" \
             --title "podkop-xray ${PKG_VERSION}-${PKG_BUILD}" \
-            --notes "$(cat <<EOF
-          ## podkop-xray ${PKG_VERSION}-${PKG_BUILD}
-
-          Selective domain routing for OpenWrt using Xray-core with XHTTP transport.
-
-          ### Installation (one command)
-          \`\`\`sh
-          wget -qO- https://raw.githubusercontent.com/${REPO_NAME}/main/install.sh | sh
-          \`\`\`
-
-          ### APK packages
-          - \`$(basename "$CORE_APK")\` — core package
-          - \`$(basename "$LUCI_APK")\` — LuCI web UI
-
-          ### Xray-core
-          Requires xray-core ${XRAY_VER} (installed automatically by install.sh)
-          EOF
-          )" \
+            --notes "$NOTES" \
             "$CORE_APK" \
             "$LUCI_APK"
