@@ -1,0 +1,13 @@
+FROM podkop-xray-sdk-apk:latest
+
+ARG PODKOP_XRAY_VERSION
+ARG PODKOP_XRAY_BUILD=0
+ENV PODKOP_XRAY_VERSION=${PODKOP_XRAY_VERSION}
+ENV PODKOP_XRAY_BUILD=${PODKOP_XRAY_BUILD}
+
+COPY . /builder/package/feeds/utilities/podkop-xray
+COPY ./luci-app-podkop-xray /builder/package/feeds/luci/luci-app-podkop-xray
+
+RUN make defconfig && \
+    make package/podkop-xray/compile -j1 V=s && \
+    make package/luci-app-podkop-xray/compile -j1 V=s

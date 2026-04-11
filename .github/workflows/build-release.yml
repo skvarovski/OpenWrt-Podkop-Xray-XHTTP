@@ -1,0 +1,98 @@
+name: Build APK & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Parse version from tag
+        id: version
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          # Tag: v0.26.3.27-0 → VERSION=0.26.3.27, BUILD=0
+          TAG="${REF_NAME#v}"
+          VERSION="${TAG%-*}"
+          BUILD="${TAG##*-}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "build=$BUILD" >> "$GITHUB_OUTPUT"
+          echo "Version: $VERSION, Build: $BUILD"
+
+      - name: Build SDK base image
+        run: docker build -t podkop-xray-sdk-apk:latest -f sdk/Dockerfile-sdk-apk sdk/
+
+      - name: Build APK packages
+        env:
+          PKG_VERSION: ${{ steps.version.outputs.version }}
+          PKG_BUILD: ${{ steps.version.outputs.build }}
+        run: |
+          docker build \
+            --build-arg PODKOP_XRAY_VERSION="$PKG_VERSION" \
+            --build-arg PODKOP_XRAY_BUILD="$PKG_BUILD" \
+            -t podkop-xray-build \
+            -f Dockerfile-apk .
+
+      - name: Extract APK files
+        run: |
+          mkdir -p ./bin/apk
+          docker create --name px-extract podkop-xray-build
+          docker cp px-extract:/builder/bin/packages/x86_64/utilities/. ./bin/apk/ 2>/dev/null || true
+          docker cp px-extract:/builder/bin/packages/x86_64/luci/. ./bin/apk/ 2>/dev/null || true
+          docker rm px-extract
+          echo "=== Built APK packages ==="
+          ls -la ./bin/apk/*.apk
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PKG_VERSION: ${{ steps.version.outputs.version }}
+          PKG_BUILD: ${{ steps.version.outputs.build }}
+          REPO_NAME: ${{ github.repository }}
+        run: |
+          TAG="v${PKG_VERSION}-${PKG_BUILD}"
+
+          # Find our APK files (skip luci-base, luci-i18n, etc.)
+          CORE_APK=$(ls ./bin/apk/podkop-xray_*.apk 2>/dev/null | head -1)
+          LUCI_APK=$(ls ./bin/apk/luci-app-podkop-xray_*.apk 2>/dev/null | head -1)
+
+          if [ -z "$CORE_APK" ] || [ -z "$LUCI_APK" ]; then
+            echo "ERROR: APK files not found"
+            ls -la ./bin/apk/
+            exit 1
+          fi
+
+          XRAY_VER="${PKG_VERSION#0.}"
+
+          gh release create "$TAG" \
+            --title "podkop-xray ${PKG_VERSION}-${PKG_BUILD}" \
+            --notes "$(cat <<EOF
+          ## podkop-xray ${PKG_VERSION}-${PKG_BUILD}
+
+          Selective domain routing for OpenWrt using Xray-core with XHTTP transport.
+
+          ### Installation (one command)
+          \`\`\`sh
+          wget -qO- https://raw.githubusercontent.com/${REPO_NAME}/main/install.sh | sh
+          \`\`\`
+
+          ### APK packages
+          - \`$(basename "$CORE_APK")\` — core package
+          - \`$(basename "$LUCI_APK")\` — LuCI web UI
+
+          ### Xray-core
+          Requires xray-core ${XRAY_VER} (installed automatically by install.sh)
+          EOF
+          )" \
+            "$CORE_APK" \
+            "$LUCI_APK"

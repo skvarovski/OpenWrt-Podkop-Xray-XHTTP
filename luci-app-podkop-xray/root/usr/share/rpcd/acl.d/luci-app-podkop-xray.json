@@ -1,0 +1,28 @@
+{
+	"luci-app-podkop-xray": {
+		"description": "Grant access to podkop-xray configuration",
+		"read": {
+			"ubus": {
+				"service": [
+					"list"
+				]
+			},
+			"uci": [
+				"podkop-xray"
+			],
+			"file": {
+				"/usr/bin/podkop-xray *": [
+					"exec"
+				],
+				"/etc/init.d/podkop-xray *": [
+					"exec"
+				]
+			}
+		},
+		"write": {
+			"uci": [
+				"podkop-xray"
+			]
+		}
+	}
+}

@@ -1,0 +1,41 @@
+{
+	"admin/services/podkop-xray": {
+		"title": "Podkop Xray",
+		"order": 60,
+		"action": {
+			"type": "firstchild"
+		},
+		"depends": {
+			"acl": [
+				"luci-app-podkop-xray"
+			],
+			"uci": {
+				"podkop-xray": true
+			}
+		}
+	},
+	"admin/services/podkop-xray/sections": {
+		"title": "Основное",
+		"order": 10,
+		"action": {
+			"type": "view",
+			"path": "podkop-xray/sections"
+		}
+	},
+	"admin/services/podkop-xray/settings": {
+		"title": "Settings",
+		"order": 20,
+		"action": {
+			"type": "view",
+			"path": "podkop-xray/settings"
+		}
+	},
+	"admin/services/podkop-xray/diagnostics": {
+		"title": "Diagnostics",
+		"order": 30,
+		"action": {
+			"type": "view",
+			"path": "podkop-xray/diagnostics"
+		}
+	}
+}
