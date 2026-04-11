@@ -53,52 +53,39 @@ jobs:
           echo "=== Built APK packages ==="
           ls -la ./bin/apk/*.apk
 
-      - name: Create GitHub Release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PKG_VERSION: ${{ steps.version.outputs.version }}
-          PKG_BUILD: ${{ steps.version.outputs.build }}
-          REPO_NAME: ${{ github.repository }}
+      - name: Find APK files
+        id: apk
         run: |
-          TAG="v${PKG_VERSION}-${PKG_BUILD}"
-
-          # Find our APK files (skip luci-base, luci-i18n, etc.)
           CORE_APK=$(ls ./bin/apk/podkop-xray_*.apk 2>/dev/null | head -1)
           LUCI_APK=$(ls ./bin/apk/luci-app-podkop-xray_*.apk 2>/dev/null | head -1)
-
           if [ -z "$CORE_APK" ] || [ -z "$LUCI_APK" ]; then
             echo "ERROR: APK files not found"
             ls -la ./bin/apk/
             exit 1
           fi
+          echo "core=$CORE_APK" >> "$GITHUB_OUTPUT"
+          echo "luci=$LUCI_APK" >> "$GITHUB_OUTPUT"
+          echo "Found: $CORE_APK $LUCI_APK"
 
-          XRAY_VER="${PKG_VERSION#0.}"
-          CORE_NAME=$(basename "$CORE_APK")
-          LUCI_NAME=$(basename "$LUCI_APK")
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "podkop-xray ${{ steps.version.outputs.version }}-${{ steps.version.outputs.build }}"
+          body: |
+            ## podkop-xray ${{ steps.version.outputs.version }}-${{ steps.version.outputs.build }}
 
-          echo "## podkop-xray ${PKG_VERSION}-${PKG_BUILD}" > /tmp/release-notes.md
-          echo "" >> /tmp/release-notes.md
-          echo "Selective domain routing for OpenWrt using Xray-core with XHTTP transport." >> /tmp/release-notes.md
-          echo "" >> /tmp/release-notes.md
-          echo "### Installation (one command)" >> /tmp/release-notes.md
-          echo "\`\`\`sh" >> /tmp/release-notes.md
-          echo "wget -qO- https://raw.githubusercontent.com/${REPO_NAME}/main/install.sh | sh" >> /tmp/release-notes.md
-          echo "\`\`\`" >> /tmp/release-notes.md
-          echo "" >> /tmp/release-notes.md
-          echo "### APK packages" >> /tmp/release-notes.md
-          echo "- \`${CORE_NAME}\` — core package" >> /tmp/release-notes.md
-          echo "- \`${LUCI_NAME}\` — LuCI web UI" >> /tmp/release-notes.md
-          echo "" >> /tmp/release-notes.md
-          echo "### Xray-core" >> /tmp/release-notes.md
-          echo "Requires xray-core ${XRAY_VER} (installed automatically by install.sh)" >> /tmp/release-notes.md
+            Selective domain routing for OpenWrt using Xray-core with XHTTP transport.
 
-          echo "=== Release notes ==="
-          cat /tmp/release-notes.md
-          echo "=== Creating release $TAG ==="
-          echo "APK files: $CORE_APK $LUCI_APK"
+            ### Installation (one command)
+            ```sh
+            wget -qO- https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | sh
+            ```
 
-          gh release create "$TAG" \
-            --title "podkop-xray ${PKG_VERSION}-${PKG_BUILD}" \
-            --notes-file /tmp/release-notes.md \
-            "$CORE_APK" \
-            "$LUCI_APK"
+            ### APK packages
+            See attached files below.
+
+            ### Xray-core
+            Requires xray-core (installed automatically by install.sh)
+          files: |
+            ${{ steps.apk.outputs.core }}
+            ${{ steps.apk.outputs.luci }}
