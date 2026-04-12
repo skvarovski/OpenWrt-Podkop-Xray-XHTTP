@@ -35,6 +35,18 @@ After installation:
 - ~15MB free space
 - Working internet connection
 
+### 🔥 Recommended: Custom Firmware with All Dependencies
+
+> **For the best experience, build a firmware image with all required packages pre-installed.** This eliminates dependency issues and ensures everything works out of the box.
+
+Use [OpenWrt Firmware Selector](https://firmware-selector.openwrt.org/) for your device and add these packages to the **"Installed Packages"** field:
+
+```
+-dnsmasq dnsmasq-full kmod-nft-tproxy curl jq coreutils-base64 bind-dig unzip
+```
+
+These are added **on top of** the default package set for your device. See [firmware/README.md](firmware/README.md) for a complete example with Xiaomi AX3000T (including Wi-Fi setup, Russian locale, and other useful packages).
+
 ## ✨ Features
 
 - 🛡️ **VLESS + REALITY** — all transports (TCP, XHTTP, gRPC) with REALITY security
