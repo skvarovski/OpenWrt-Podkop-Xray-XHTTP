@@ -49,34 +49,39 @@ jobs:
           mkdir -p ./bin/apk
           docker create --name px-extract podkop-xray-build
 
-          echo "=== Searching for APK files inside container ==="
-          docker export px-extract | tar -t 2>/dev/null | grep '\.apk$' || echo "No .apk files found via tar"
+          echo "=== Listing all APK paths inside container ==="
+          docker run --rm podkop-xray-build find /builder/bin -name '*.apk' 2>/dev/null || echo "No APK files found"
 
-          echo "=== Trying known paths ==="
-          docker cp px-extract:/builder/bin/packages/x86_64/utilities/. ./bin/apk/ 2>&1 || echo "WARN: utilities path failed"
-          docker cp px-extract:/builder/bin/packages/x86_64/luci/. ./bin/apk/ 2>&1 || echo "WARN: luci path failed"
+          echo "=== Trying x86_64 paths ==="
+          docker cp px-extract:/builder/bin/packages/x86_64/utilities/. ./bin/apk/ 2>/dev/null || true
+          docker cp px-extract:/builder/bin/packages/x86_64/luci/. ./bin/apk/ 2>/dev/null || true
 
-          echo "=== Also trying architecture-independent path ==="
-          docker cp px-extract:/builder/bin/packages/all/utilities/. ./bin/apk/ 2>&1 || echo "WARN: all/utilities path failed"
-          docker cp px-extract:/builder/bin/packages/all/luci/. ./bin/apk/ 2>&1 || echo "WARN: all/luci path failed"
+          echo "=== Trying all arch paths ==="
+          docker cp px-extract:/builder/bin/packages/all/utilities/. ./bin/apk/ 2>/dev/null || true
+          docker cp px-extract:/builder/bin/packages/all/luci/. ./bin/apk/ 2>/dev/null || true
 
           docker rm px-extract
 
           echo "=== Contents of ./bin/apk/ ==="
-          ls -la ./bin/apk/ || echo "Directory empty or missing"
+          ls -la ./bin/apk/ 2>/dev/null || echo "Directory empty"
 
           CORE_APK=$(find ./bin/apk -name 'podkop-xray_*.apk' ! -name 'luci-*' 2>/dev/null | head -1)
           LUCI_APK=$(find ./bin/apk -name 'luci-app-podkop-xray_*.apk' 2>/dev/null | head -1)
 
           if [ -z "$CORE_APK" ] || [ -z "$LUCI_APK" ]; then
-            echo "ERROR: APK files not found after searching all paths"
-            find ./bin/ -name '*.apk' 2>/dev/null || echo "No APK files anywhere in ./bin/"
+            echo "ERROR: APK files not found"
+            echo "=== Full search in ./bin/ ==="
+            find ./bin/ -type f 2>/dev/null || echo "Nothing in ./bin/"
+            echo "=== Trying to find inside container directly ==="
+            docker run --rm podkop-xray-build find /builder/bin -type f -name '*.apk' 2>/dev/null || true
             exit 1
           fi
 
           echo "core=$CORE_APK" >> "$GITHUB_OUTPUT"
           echo "luci=$LUCI_APK" >> "$GITHUB_OUTPUT"
-          echo "Found: $CORE_APK $LUCI_APK"
+          echo "=== Found APK files ==="
+          echo "Core: $CORE_APK"
+          echo "LuCI: $LUCI_APK"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
