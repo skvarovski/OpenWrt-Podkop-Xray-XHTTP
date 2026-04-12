@@ -45,10 +45,10 @@ rm -rf "$TMPDIR"
 echo "Xray $(xray version | head -1)"
 
 echo "=== Installing podkop-xray packages ==="
-# APK naming: podkop-xray_VERSION-rBUILD_all.apk (OpenWrt SDK standard)
+# APK naming: podkop-xray-VERSION-rBUILD.apk (OpenWrt SDK format)
 APK_SUFFIX="${XRAY_VER_FROM_TAG}-r${BUILD_NUM}"
-wget -qO /tmp/podkop-xray.apk "$GITHUB/podkop-xray_${APK_SUFFIX}_all.apk"
-wget -qO /tmp/luci-app-podkop-xray.apk "$GITHUB/luci-app-podkop-xray_${APK_SUFFIX}_all.apk"
+wget -qO /tmp/podkop-xray.apk "$GITHUB/podkop-xray-${APK_SUFFIX}.apk"
+wget -qO /tmp/luci-app-podkop-xray.apk "$GITHUB/luci-app-podkop-xray-${APK_SUFFIX}.apk"
 
 # Install dependencies
 apk add curl jq kmod-nft-tproxy coreutils-base64 bind-dig dnsmasq-full 2>/dev/null || true
