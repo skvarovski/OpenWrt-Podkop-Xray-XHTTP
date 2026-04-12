@@ -187,8 +187,12 @@ dnsmasq_configure() {
     local shutdown_correctly
     config_get shutdown_correctly "settings" "shutdown_correctly"
     if [ "$shutdown_correctly" -eq 0 ]; then
-        log "Previous shutdown was not correct, reconfiguration of dnsmasq is not required"
-        return 0
+        # Check if dnsmasq is actually already configured for xray
+        if uci_get "dhcp" "@dnsmasq[0]" "server" 2>/dev/null | grep -q "$XRAY_DNS_INBOUND_ADDRESS#$XRAY_DNS_INBOUND_PORT"; then
+            log "Previous shutdown was not correct, dnsmasq already configured for Xray"
+            return 0
+        fi
+        log "First start or dnsmasq not configured, proceeding with configuration"
     fi
 
     log "Backup dnsmasq configuration"

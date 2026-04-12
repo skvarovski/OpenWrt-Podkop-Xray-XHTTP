@@ -422,7 +422,7 @@ add_cron_job() {
 }
 
 remove_cron_job() {
-    (crontab -l | grep -v "/usr/bin/podkop-xray list_update") | crontab -
+    (crontab -l 2>/dev/null | grep -v "/usr/bin/podkop-xray list_update") | crontab -
     log "Cron job removed"
 }
 

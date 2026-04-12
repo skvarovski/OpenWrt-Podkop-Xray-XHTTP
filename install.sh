@@ -18,7 +18,7 @@ echo "Latest release: $LATEST_TAG"
 
 # Tag format: v0.26.3.27-0 → extract version parts
 PKG_VER=$(echo "$LATEST_TAG" | sed 's/^v//')          # 0.26.3.27-0
-XRAY_VER_FROM_TAG=$(echo "$PKG_VER" | sed 's/-[0-9]*$//')  # 0.26.3.27 → xray version = 26.3.27
+XRAY_VER_FROM_TAG=$(echo "$PKG_VER" | sed 's/-[0-9]*$//')  # 0.26.3.27
 BUILD_NUM=$(echo "$PKG_VER" | grep -o '[0-9]*$')       # 0
 
 GITHUB="https://github.com/$REPO/releases/download/$LATEST_TAG"
@@ -33,12 +33,14 @@ armv7*)  XRAY_ARCH="arm32-v7a" ;;
 esac
 
 echo "=== Installing xray-core $XRAY_VER ($XRAY_ARCH) ==="
+# Ensure unzip is available
+if ! command -v unzip >/dev/null 2>&1; then
+    echo "Installing unzip..."
+    apk add unzip
+fi
 TMPDIR=$(mktemp -d)
 wget -qO "$TMPDIR/xray.zip" "https://github.com/XTLS/Xray-core/releases/download/v${XRAY_VER}/Xray-linux-${XRAY_ARCH}.zip"
-unzip -o "$TMPDIR/xray.zip" xray -d "$TMPDIR/" 2>/dev/null || {
-    echo "unzip not found, trying busybox..."
-    busybox unzip -o "$TMPDIR/xray.zip" xray -d "$TMPDIR/"
-}
+unzip -o "$TMPDIR/xray.zip" xray -d "$TMPDIR/"
 mv "$TMPDIR/xray" /usr/bin/xray
 chmod +x /usr/bin/xray
 rm -rf "$TMPDIR"
@@ -59,6 +61,12 @@ rm -f /tmp/podkop-xray.apk /tmp/luci-app-podkop-xray.apk
 
 echo "=== Enabling service ==="
 /etc/init.d/podkop-xray enable
+
+# Ensure crond is running (needed for automatic list updates)
+if ! pgrep -x crond >/dev/null 2>&1; then
+    /etc/init.d/cron start 2>/dev/null
+    /etc/init.d/cron enable 2>/dev/null
+fi
 
 echo ""
 echo "=== podkop-xray installed ==="
