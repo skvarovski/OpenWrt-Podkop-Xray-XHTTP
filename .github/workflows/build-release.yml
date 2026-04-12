@@ -47,11 +47,20 @@ jobs:
         id: apk
         run: |
           mkdir -p ./bin/apk
-          docker create --name px-extract podkop-xray-build
-          docker cp px-extract:/output/. ./bin/apk/
-          docker rm px-extract
 
-          echo "=== Extracted APK files ==="
+          echo "=== Copying files from container via docker run ==="
+          docker run --rm -v "$(pwd)/bin/apk:/host" podkop-xray-build sh -c '
+            echo "=== Contents of /output/ ==="
+            ls -la /output/ 2>/dev/null || echo "/output/ empty or missing"
+            echo "=== All package files in /builder/bin/ ==="
+            find /builder/bin -type f \( -name "*.apk" -o -name "*.ipk" \) 2>/dev/null || echo "No package files found"
+            echo "=== Copying to host ==="
+            cp /output/* /host/ 2>/dev/null || cp /builder/bin/packages/*/*/*.apk /host/ 2>/dev/null || cp /builder/bin/packages/*/*/*.ipk /host/ 2>/dev/null || echo "WARN: no files copied"
+            echo "=== Host dir contents ==="
+            ls -la /host/
+          '
+
+          echo "=== Local ./bin/apk/ ==="
           ls -la ./bin/apk/
 
           CORE_APK=$(find ./bin/apk -name 'podkop-xray_*' \( -name '*.apk' -o -name '*.ipk' \) ! -name 'luci-*' | head -1)
@@ -59,7 +68,6 @@ jobs:
 
           if [ -z "$CORE_APK" ] || [ -z "$LUCI_APK" ]; then
             echo "ERROR: Expected package files not found"
-            echo "=== All files in ./bin/apk/ ==="
             find ./bin/apk -type f 2>/dev/null
             exit 1
           fi
