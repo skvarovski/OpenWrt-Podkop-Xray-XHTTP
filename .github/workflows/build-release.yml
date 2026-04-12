@@ -54,11 +54,13 @@ jobs:
           echo "=== Extracted APK files ==="
           ls -la ./bin/apk/
 
-          CORE_APK=$(find ./bin/apk -name 'podkop-xray_*.apk' ! -name 'luci-*' | head -1)
-          LUCI_APK=$(find ./bin/apk -name 'luci-app-podkop-xray_*.apk' | head -1)
+          CORE_APK=$(find ./bin/apk -name 'podkop-xray_*' \( -name '*.apk' -o -name '*.ipk' \) ! -name 'luci-*' | head -1)
+          LUCI_APK=$(find ./bin/apk -name 'luci-app-podkop-xray_*' \( -name '*.apk' -o -name '*.ipk' \) | head -1)
 
           if [ -z "$CORE_APK" ] || [ -z "$LUCI_APK" ]; then
-            echo "ERROR: Expected APK files not found"
+            echo "ERROR: Expected package files not found"
+            echo "=== All files in ./bin/apk/ ==="
+            find ./bin/apk -type f 2>/dev/null
             exit 1
           fi
 

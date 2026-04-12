@@ -12,5 +12,8 @@ RUN make defconfig && \
     make package/podkop-xray/compile -j1 V=s && \
     make package/luci-app-podkop-xray/compile -j1 V=s && \
     mkdir -p /output && \
-    find /builder/bin -name '*.apk' -exec cp {} /output/ \; && \
-    ls -la /output/
+    echo "=== All built files ===" && \
+    find /builder/bin -type f \( -name '*.apk' -o -name '*.ipk' \) && \
+    cp /builder/bin/packages/*/*/*.apk /output/ 2>/dev/null; \
+    cp /builder/bin/packages/*/*/*.ipk /output/ 2>/dev/null; \
+    ls -la /output/ || true
