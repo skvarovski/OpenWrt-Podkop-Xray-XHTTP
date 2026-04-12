@@ -10,4 +10,7 @@ COPY ./luci-app-podkop-xray /builder/package/feeds/luci/luci-app-podkop-xray
 
 RUN make defconfig && \
     make package/podkop-xray/compile -j1 V=s && \
-    make package/luci-app-podkop-xray/compile -j1 V=s
+    make package/luci-app-podkop-xray/compile -j1 V=s && \
+    mkdir -p /output && \
+    find /builder/bin -name '*.apk' -exec cp {} /output/ \; && \
+    ls -la /output/

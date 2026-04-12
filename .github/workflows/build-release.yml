@@ -48,38 +48,22 @@ jobs:
         run: |
           mkdir -p ./bin/apk
           docker create --name px-extract podkop-xray-build
-
-          echo "=== Listing all APK paths inside container ==="
-          docker run --rm podkop-xray-build find /builder/bin -name '*.apk' 2>/dev/null || echo "No APK files found"
-
-          echo "=== Trying x86_64 paths ==="
-          docker cp px-extract:/builder/bin/packages/x86_64/utilities/. ./bin/apk/ 2>/dev/null || true
-          docker cp px-extract:/builder/bin/packages/x86_64/luci/. ./bin/apk/ 2>/dev/null || true
-
-          echo "=== Trying all arch paths ==="
-          docker cp px-extract:/builder/bin/packages/all/utilities/. ./bin/apk/ 2>/dev/null || true
-          docker cp px-extract:/builder/bin/packages/all/luci/. ./bin/apk/ 2>/dev/null || true
-
+          docker cp px-extract:/output/. ./bin/apk/
           docker rm px-extract
 
-          echo "=== Contents of ./bin/apk/ ==="
-          ls -la ./bin/apk/ 2>/dev/null || echo "Directory empty"
+          echo "=== Extracted APK files ==="
+          ls -la ./bin/apk/
 
-          CORE_APK=$(find ./bin/apk -name 'podkop-xray_*.apk' ! -name 'luci-*' 2>/dev/null | head -1)
-          LUCI_APK=$(find ./bin/apk -name 'luci-app-podkop-xray_*.apk' 2>/dev/null | head -1)
+          CORE_APK=$(find ./bin/apk -name 'podkop-xray_*.apk' ! -name 'luci-*' | head -1)
+          LUCI_APK=$(find ./bin/apk -name 'luci-app-podkop-xray_*.apk' | head -1)
 
           if [ -z "$CORE_APK" ] || [ -z "$LUCI_APK" ]; then
-            echo "ERROR: APK files not found"
-            echo "=== Full search in ./bin/ ==="
-            find ./bin/ -type f 2>/dev/null || echo "Nothing in ./bin/"
-            echo "=== Trying to find inside container directly ==="
-            docker run --rm podkop-xray-build find /builder/bin -type f -name '*.apk' 2>/dev/null || true
+            echo "ERROR: Expected APK files not found"
             exit 1
           fi
 
           echo "core=$CORE_APK" >> "$GITHUB_OUTPUT"
           echo "luci=$LUCI_APK" >> "$GITHUB_OUTPUT"
-          echo "=== Found APK files ==="
           echo "Core: $CORE_APK"
           echo "LuCI: $LUCI_APK"
 
