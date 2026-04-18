@@ -45,13 +45,10 @@ DNS конфигурация Xray содержит только FakeDNS + fallba
 - `text` — текстовое поле с поддержкой комментариев (`//`), разделители: запятая, пробел, перенос строки
 
 ### Finalmask (DPI resistance)
-URL-параметры прокси-строки:
-- `sudoku=PASSWORD` — sudoku layer (трансформация данных)
-- `fragment_length=10-50` — fragment layer (фрагментация TLS ClientHello)
-- `fragment_delay=5-15` — задержка между фрагментами
-- `fragment_packets=tlshello` — тип пакетов для фрагментации (default: tlshello)
+URL-параметр прокси-строки:
+- `fm=<url-encoded-json>` — JSON-объект, который целиком подставляется в `streamSettings.finalmask`.
 
-Порядок слоев: fragment первым, sudoku вторым.
+Декодированный `fm` имеет вид `{"tcp":[{...layer...}, ...]}`. Типы слоёв (`fragment`, `sudoku`, будущие) и их настройки определяются xray-core; podkop-xray пропускает объект без изменений. Единственная проверка — что `fm` после `url_decode` парсится как JSON (`jq -e`); битый JSON → лог `Invalid JSON in fm= parameter of proxy_string` + `exit 1`.
 
 ### Geodata
 - **geosite.dat** / **geoip.dat** — скачиваются из `skvarovski/russia-v2ray-rules-dat-small`

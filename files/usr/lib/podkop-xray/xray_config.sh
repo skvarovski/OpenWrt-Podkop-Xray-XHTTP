@@ -308,44 +308,17 @@ xray_add_vless_outbound() {
     stream_settings=$(echo "$stream_settings" | jq \
         '. + { sockopt: { mark: 255 } }')
 
-    # Finalmask: fragment + sudoku (DPI resistance layers)
-    local sudoku fragment_length fragment_delay fragment_packets
-    sudoku=$(url_get_query_param "$url" "sudoku")
-    fragment_length=$(url_get_query_param "$url" "fragment_length")
-    fragment_delay=$(url_get_query_param "$url" "fragment_delay")
-    fragment_packets=$(url_get_query_param "$url" "fragment_packets")
-    [ -z "$fragment_packets" ] && fragment_packets="tlshello"
-
-    if [ -n "$fragment_length" ] || [ -n "$sudoku" ]; then
-        local tcp_layers="[]"
-
-        # Fragment layer first (breaks TLS ClientHello into chunks)
-        if [ -n "$fragment_length" ]; then
-            local frag_settings
-            frag_settings=$(jq -n \
-                --arg packets "$fragment_packets" \
-                --arg length "$fragment_length" \
-                '{ packets: $packets, length: $length }')
-            if [ -n "$fragment_delay" ]; then
-                frag_settings=$(echo "$frag_settings" | jq --arg delay "$fragment_delay" \
-                    '. + { delay: $delay }')
-            fi
-            tcp_layers=$(echo "$tcp_layers" | jq --argjson settings "$frag_settings" \
-                '. + [{ type: "fragment", settings: $settings }]')
+    # Finalmask: DPI resistance layers (fragment, sudoku, etc.) via fm= URL param
+    local fm_raw fm_decoded
+    fm_raw=$(url_get_query_param "$url" "fm")
+    if [ -n "$fm_raw" ]; then
+        fm_decoded=$(url_decode "$fm_raw")
+        if ! echo "$fm_decoded" | jq -e '.' >/dev/null 2>&1; then
+            log "Invalid JSON in fm= parameter of proxy_string" "error"
+            exit 1
         fi
-
-        # Sudoku layer second (transforms data appearance)
-        if [ -n "$sudoku" ]; then
-            local sudoku_settings
-            sudoku_settings=$(jq -n \
-                --arg password "$sudoku" \
-                '{ password: $password, ascii: "prefer_ascii", paddingMin: 1, paddingMax: 8 }')
-            tcp_layers=$(echo "$tcp_layers" | jq --argjson settings "$sudoku_settings" \
-                '. + [{ type: "sudoku", settings: $settings }]')
-        fi
-
-        stream_settings=$(echo "$stream_settings" | jq --argjson layers "$tcp_layers" \
-            '. + { finalmask: { tcp: $layers } }')
+        stream_settings=$(echo "$stream_settings" | jq --argjson fm "$fm_decoded" \
+            '. + { finalmask: $fm }')
     fi
 
     # Combine outbound with streamSettings

@@ -113,25 +113,23 @@ config section 'main'
 
 Все VLESS соединения используют **REALITY** для максимальной устойчивости к DPI:
 
-🛡️ **VLESS + XHTTP + REALITY + Fragment + Sudoku** — максимальная защита от DPI, лучшая связка на март 2026 🔥🏆:
+🛡️ **VLESS + XHTTP + REALITY + Finalmask** — максимальная защита от DPI, лучшая связка на апрель 2026 🔥🏆:
 ```
-vless://UUID@server:443?type=xhttp&security=reality&pbk=KEY&sid=ID&sni=example.com&fp=chrome&path=/tunnel&mode=auto&fragment_length=10-50&fragment_delay=5-15&sudoku=mypassword
+vless://UUID@server:443?type=xhttp&security=reality&pbk=KEY&sid=ID&sni=example.com&fp=chrome&path=/tunnel&mode=auto&fm=%7B%22tcp%22%3A%5B%7B%22type%22%3A%22fragment%22%2C%22settings%22%3A%7B%22packets%22%3A%22tlshello%22%2C%22length%22%3A%22100-300%22%2C%22delay%22%3A%221-5%22%7D%7D%2C%7B%22type%22%3A%22sudoku%22%2C%22settings%22%3A%7B%22password%22%3A%22mypassword%22%2C%22paddingMin%22%3A10%2C%22paddingMax%22%3A50%7D%7D%5D%7D
 ```
-> 💡 Пароль `sudoku` должен совпадать на клиенте и сервере. Fragment разбивает TLS ClientHello на мелкие фрагменты, Sudoku трансформирует паттерны данных — вместе они побеждают глубокую инспекцию пакетов.
+> 💡 `fm=` — это URL-encoded JSON-объект, который целиком подставляется в `streamSettings.finalmask`. Декодированный пример выше:
+> ```json
+> {"tcp":[
+>   {"type":"fragment","settings":{"packets":"tlshello","length":"100-300","delay":"1-5"}},
+>   {"type":"sudoku","settings":{"password":"mypassword","paddingMin":10,"paddingMax":50}}
+> ]}
+> ```
+> Fragment разбивает TLS ClientHello на мелкие фрагменты, Sudoku трансформирует паттерны данных — вместе они побеждают глубокую инспекцию пакетов. Пароль `sudoku` должен совпадать на клиенте и сервере.
 
-⚡ **VLESS + XHTTP + REALITY + Fragment** — фрагментация TLS ClientHello для обхода DPI:
-```
-vless://UUID@server:443?type=xhttp&security=reality&pbk=KEY&sid=ID&sni=example.com&fp=chrome&path=/tunnel&mode=auto&fragment_length=10-50&fragment_delay=5-15
-```
-
-📋 **Параметры Finalmask:**
-
-| Параметр | Пример | Описание |
-|----------|--------|----------|
-| `fragment_length` | `10-50` | Диапазон размера фрагментов TLS ClientHello (байты) |
-| `fragment_delay` | `5-15` | Задержка между фрагментами (мс) |
-| `fragment_packets` | `tlshello` | Что фрагментировать (по умолчанию: `tlshello`) |
-| `sudoku` | `mypassword` | Пароль обфускации Sudoku (должен совпадать на сервере) |
+📋 **Finalmask (параметр `fm=`):**
+- Любая клиентская панель, поддерживающая новый формат Finalmask в xray-core (Hiddify, v2rayN и т.п.), генерирует `fm=` автоматически из серверного конфига.
+- Типы слоёв (`fragment`, `sudoku`, будущие) и их настройки определяются xray-core — podkop-xray пропускает объект без изменений.
+- Если `fm=` присутствует, но после декодирования не является валидным JSON, сервис откажется стартовать и запишет в лог `Invalid JSON in fm= parameter of proxy_string`.
 
 **VLESS + TCP + REALITY** (XTLS-Vision — золотой стандарт):
 ```
