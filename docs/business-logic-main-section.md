@@ -32,11 +32,17 @@ DNS конфигурация Xray содержит только FakeDNS + fallba
 
 | rules_type | Порядок правил | Catch-all |
 |---|---|---|
-| `proxy_direct_block` | proxy → direct → block | `block` |
+| `proxy_direct_block` (default) | proxy → direct → block | `block` |
 | `block_proxy_direct` | block → proxy → direct | `direct` |
 | `direct_proxy_block` | direct → proxy → block | `block` |
+| `block_direct_proxy` | block → direct → proxy | `proxy` |
+| `proxy_everything` | (все списки игнорируются) | `proxy` |
 
-Логика: последнее слово в `rules_type` = outbound для неизвестного трафика.
+Логика: последнее слово в `rules_type` = outbound для неизвестного трафика. `proxy` в catch-all означает primary proxy-outbound main-секции (тег от `get_outbound_tag_by_section "main"`).
+
+`proxy_everything` — особый режим: `_generate_routing_rules` возвращает `return 0` в самом начале для секции, не добавляя ни одного правила из geosite/geoip/remote/local/user-списков. Весь трафик, попадающий в xray, ловится финальным catch-all'ом и уходит в proxy. Полезно как аварийный обход, когда хочется направить всё через VPN и вручную добавить исключения через `remote_subnet_lists` / `routing_included_ips`.
+
+`block_direct_proxy` сохраняет порядок block → direct → proxy (явные чёрные и прямые списки вычисляются до catch-all), но неизвестный трафик идёт в proxy — политика «через VPN по умолчанию, кроме явно перечисленного».
 
 ### User domains/subnets
 Три режима (`user_domain_list_type` / `user_subnet_list_type`):
@@ -73,7 +79,7 @@ UCI config → xray_generate_config()
   ├── QUIC → block (если disable_quic=1)
   ├── BitTorrent → direct
   ├── leak-test/IP-check домены → всегда proxy (api.ipify.org, ipleak.net, 2ip.ru и др.)
-  └── catch-all → определяется последним словом rules_type (direct/block)
+  └── catch-all → определяется последним словом rules_type (direct/block/proxy)
 ```
 
 ### Диагностические домены (всегда через прокси)

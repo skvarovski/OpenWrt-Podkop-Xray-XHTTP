@@ -162,6 +162,10 @@ Controls the order of geosite/geoip rule evaluation (first match wins). The last
 | `proxy_direct_block` | Proxy → Direct → Block | block |
 | `block_proxy_direct` | Block → Proxy → Direct (default) | direct |
 | `direct_proxy_block` | Direct → Proxy → Block | block |
+| `block_direct_proxy` | Block → Direct → Proxy | proxy |
+| `proxy_everything` | all lists ignored | proxy |
+
+`block_direct_proxy` sends any traffic not matched by explicit block/direct lists through the proxy — useful for a "VPN unless listed" policy. `proxy_everything` skips every geosite/geoip/user list in the section and forwards all traffic that reaches xray straight to the proxy outbound.
 
 ### 📚 Advanced documentation
 

@@ -160,6 +160,10 @@ socks://user:pass@127.0.0.1:1080
 | `proxy_direct_block` | Proxy → Direct → Block | block |
 | `block_proxy_direct` | Block → Proxy → Direct (по умолчанию) | direct |
 | `direct_proxy_block` | Direct → Proxy → Block | block |
+| `block_direct_proxy` | Block → Direct → Proxy | proxy |
+| `proxy_everything` | все списки игнорируются | proxy |
+
+`block_direct_proxy` — всё, что не попало в явные block/direct-списки, уходит через прокси (политика «VPN по умолчанию, кроме явно указанного»). `proxy_everything` полностью игнорирует geosite/geoip/user-списки секции: весь дошедший до xray трафик идёт в proxy outbound.
 
 ### 📚 Дополнительная документация
 

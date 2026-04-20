@@ -230,6 +230,8 @@ return view.extend({
       o.value("proxy_direct_block", _("Proxy → Direct → Block"));
       o.value("block_proxy_direct", _("Block → Proxy → Direct"));
       o.value("direct_proxy_block", _("Direct → Proxy → Block"));
+      o.value("block_direct_proxy", _("Block → Direct → Proxy (catch-all → proxy)"));
+      o.value("proxy_everything", _("Proxy everything (ignore all lists)"));
       o.default = "proxy_direct_block";
       o.rmempty = true;
 

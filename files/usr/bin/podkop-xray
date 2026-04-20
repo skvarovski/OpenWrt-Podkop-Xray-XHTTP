@@ -159,6 +159,9 @@ xray_generate_config() {
     block_proxy_direct)
         catchall_outbound_tag="$XRAY_DIRECT_OUTBOUND_TAG"
         ;;
+    block_direct_proxy|proxy_everything)
+        catchall_outbound_tag="$primary_outbound_tag"
+        ;;
     proxy_direct_block|direct_proxy_block)
         catchall_outbound_tag="$XRAY_BLOCK_OUTBOUND_TAG"
         ;;
@@ -302,6 +305,11 @@ _generate_routing_rules() {
     local rules_type
     config_get rules_type "$section" "rules_type" "proxy_direct_block"
 
+    # proxy_everything: skip all section-level rules (catch-all → proxy handles everything)
+    if [ "$rules_type" = "proxy_everything" ]; then
+        return 0
+    fi
+
     case "$rules_type" in
     proxy_direct_block)
         config=$(process_geosite_proxy "$config" "$section" "$outbound_tag")
@@ -326,6 +334,14 @@ _generate_routing_rules() {
         config=$(process_geoip_proxy "$config" "$section" "$outbound_tag")
         config=$(process_geosite_block "$config" "$section")
         config=$(process_geoip_block "$config" "$section")
+        ;;
+    block_direct_proxy)
+        config=$(process_geosite_block "$config" "$section")
+        config=$(process_geoip_block "$config" "$section")
+        config=$(process_geosite_direct "$config" "$section")
+        config=$(process_geoip_direct "$config" "$section")
+        config=$(process_geosite_proxy "$config" "$section" "$outbound_tag")
+        config=$(process_geoip_proxy "$config" "$section" "$outbound_tag")
         ;;
     *)
         # Default: proxy → direct → block
