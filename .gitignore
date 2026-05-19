@@ -10,3 +10,8 @@
 *.swo
 *~
 *.apk
+.test-proxy-string
+.claude/
+.playwright-mcp/
+/test-results/
+node_modules/

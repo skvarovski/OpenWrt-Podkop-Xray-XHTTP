@@ -283,7 +283,6 @@ function runDnsCheck() {
     items.push({ state: data.dns_on_router ? "success" : "error", key: _("DNS on router"), value: "" });
     items.push({ state: data.dhcp_config_status ? "success" : "error", key: _("DHCP has DNS server"), value: "" });
     updateCheckStore({ order: c.order, code: c.code, title: c.title, description: meta.description, state: meta.state, items: items });
-    if (!atLeastOneGood) throw new Error("DNS checks failed");
   });
 }
 
@@ -308,7 +307,6 @@ function runXrayCheck() {
         { state: data.xray_ports_listening ? "success" : "error", key: _("Xray listening ports"), value: "" }
       ]
     });
-    if (!atLeastOneGood || !data.xray_process_running) throw new Error("Xray checks failed");
   });
 }
 
@@ -343,7 +341,6 @@ function runNftCheck() {
           key: !data.rules_other_mark_exist ? _("No other marking rules found") : _("Additional marking rules found"), value: "" }
       ]
     });
-    if (!atLeastOneGood) throw new Error("Nftables checks failed");
   });
 }
 
@@ -378,7 +375,6 @@ function runProxyCheck() {
         value: "" }
     ];
     updateCheckStore({ order: c.order, code: c.code, title: c.title, description: desc, state: meta.state, items: items });
-    if (!checks.reachable) throw new Error("Proxy checks failed");
   });
 }
 
@@ -415,12 +411,14 @@ function runChecks() {
     diagnosticsRunAction: { loading: true },
     diagnosticsChecks: api.buildInitialDiagnosticChecks(_("Pending"))
   });
-  return runDnsCheck()
-    .then(function() { return runXrayCheck(); })
-    .then(function() { return runNftCheck(); })
-    .then(function() { return runProxyCheck(); })
-    .then(function() { return runFakeIPCheck(); })
-    .catch(function(e) { logger.error("[DIAGNOSTIC]", "runChecks - e", e); })
+  function step(fn) {
+    return fn().catch(function(e) { logger.error("[DIAGNOSTIC]", "runChecks - e", e); });
+  }
+  return step(runDnsCheck)
+    .then(function() { return step(runXrayCheck); })
+    .then(function() { return step(runNftCheck); })
+    .then(function() { return step(runProxyCheck); })
+    .then(function() { return step(runFakeIPCheck); })
     .then(function() { store.set({ diagnosticsRunAction: { loading: false } }); });
 }
 

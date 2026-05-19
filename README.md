@@ -102,7 +102,7 @@ config section 'main'
         option connection_type 'proxy'
         option proxy_config_type 'url'
         option proxy_string 'vless://UUID@server:443?type=xhttp&security=reality&pbk=KEY&sid=ID&sni=example.com&fp=chrome&path=/tunnel&mode=auto'
-        option rules_type 'block_proxy_direct'
+        option rules_type 'block_direct_proxy'
         list geosite_proxy 'RU-BLOCKED'
         list geosite_proxy 'CATEGORY-MEDIA'
         list geosite_direct 'CATEGORY-RU'
@@ -155,17 +155,17 @@ socks://user:pass@127.0.0.1:1080
 
 ### 📐 Rules Type
 
-Controls the order of geosite/geoip rule evaluation (first match wins). The last word determines the catch-all outbound for unmatched traffic:
+Controls the order of geosite/geoip rule evaluation (first match wins). The last word determines the catch-all outbound for unmatched traffic. By default, geo/direct lists define what goes out directly, and everything else is routed through the proxy (VPN):
 
 | Value | Order | Catch-all |
 |-------|-------|-----------|
 | `proxy_direct_block` | Proxy → Direct → Block | block |
-| `block_proxy_direct` | Block → Proxy → Direct (default) | direct |
+| `block_proxy_direct` | Block → Proxy → Direct | direct |
 | `direct_proxy_block` | Direct → Proxy → Block | block |
-| `block_direct_proxy` | Block → Direct → Proxy | proxy |
+| `block_direct_proxy` | Block → Direct → Proxy (default) | proxy |
 | `proxy_everything` | all lists ignored | proxy |
 
-`block_direct_proxy` sends any traffic not matched by explicit block/direct lists through the proxy — useful for a "VPN unless listed" policy. `proxy_everything` skips every geosite/geoip/user list in the section and forwards all traffic that reaches xray straight to the proxy outbound.
+`block_direct_proxy` (the default) sends any traffic not matched by explicit block/direct lists through the proxy — a "VPN unless listed" policy. `proxy_everything` skips every geosite/geoip/user list in the section and forwards all traffic that reaches xray straight to the proxy outbound.
 
 ### 📚 Advanced documentation
 

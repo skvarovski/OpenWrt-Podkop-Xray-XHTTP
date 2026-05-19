@@ -38,7 +38,11 @@ function executeShellCommand(opts) {
       fs.exec(command, args),
       timeout,
       [command].concat(args).join(" ")
-    );
+    ).catch(function (err) {
+      // Timeout / async rejection: resolve with an empty result so callers
+      // always get a value and the diagnostic check reaches a terminal state.
+      return { stdout: "", stderr: (err && err.message) || "", code: 1 };
+    });
   } catch (err) {
     return Promise.resolve({ stdout: "", stderr: err?.message || "", code: 0 });
   }

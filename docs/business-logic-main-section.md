@@ -28,14 +28,14 @@ DNS конфигурация Xray содержит только FakeDNS + fallba
 **Важно:** category-aware DNS серверы (DoH по категориям) НЕ используются. Причина: Xray переставляет порядок DNS серверов — если домен матчится `domains` фильтру DoH-сервера, тот отвечает первым с реальным IP, и FakeDNS не срабатывает. Реальное разрешение DNS происходит на стороне outbound (freedom outbound для direct, proxy outbound для прокси).
 
 ### Rules Type (порядок правил маршрутизации)
-Определяет порядок оценки geosite/geoip правил и catch-all outbound:
+Определяет порядок оценки geosite/geoip правил и catch-all outbound. Дефолтная концепция проекта: geo/direct-списки задают, что идёт напрямую (direct выход), а весь остальной трафик автоматически уходит в proxy (VPN):
 
 | rules_type | Порядок правил | Catch-all |
 |---|---|---|
-| `proxy_direct_block` (default) | proxy → direct → block | `block` |
+| `proxy_direct_block` | proxy → direct → block | `block` |
 | `block_proxy_direct` | block → proxy → direct | `direct` |
 | `direct_proxy_block` | direct → proxy → block | `block` |
-| `block_direct_proxy` | block → direct → proxy | `proxy` |
+| `block_direct_proxy` (default) | block → direct → proxy | `proxy` |
 | `proxy_everything` | (все списки игнорируются) | `proxy` |
 
 Логика: последнее слово в `rules_type` = outbound для неизвестного трафика. `proxy` в catch-all означает primary proxy-outbound main-секции (тег от `get_outbound_tag_by_section "main"`).

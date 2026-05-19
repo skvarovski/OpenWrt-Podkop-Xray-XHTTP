@@ -154,7 +154,7 @@ xray_generate_config() {
     # Determine catch-all outbound based on rules_type of main section
     # Last word in rules_type = catch-all outbound (block_proxy_direct → direct)
     local rules_type_main catchall_outbound_tag
-    config_get rules_type_main "main" "rules_type" "proxy_direct_block"
+    config_get rules_type_main "main" "rules_type" "block_direct_proxy"
     case "$rules_type_main" in
     block_proxy_direct)
         catchall_outbound_tag="$XRAY_DIRECT_OUTBOUND_TAG"
@@ -303,7 +303,7 @@ _generate_routing_rules() {
 
     # Rules Type determines the order of geosite/geoip rule evaluation
     local rules_type
-    config_get rules_type "$section" "rules_type" "proxy_direct_block"
+    config_get rules_type "$section" "rules_type" "block_direct_proxy"
 
     # proxy_everything: skip all section-level rules (catch-all → proxy handles everything)
     if [ "$rules_type" = "proxy_everything" ]; then
@@ -945,12 +945,15 @@ get_system_info() {
     [ -z "$device_model" ] && device_model="unknown"
 
     geofiles_release="$(get_geofiles_release_tag)"
+    if [ -z "$geofiles_release" ] && [ -f "$TMP_GEOFILES_FOLDER/geosite.dat" ]; then
+        geofiles_release="$(date -r "$TMP_GEOFILES_FOLDER/geosite.dat" +%Y%m%d%H%M 2>/dev/null)"
+    fi
     [ -z "$geofiles_release" ] && geofiles_release="not downloaded"
 
     [ -f "$TMP_GEOFILES_FOLDER/geosite.dat" ] && geosite_status="ok" || geosite_status="missing"
     [ -f "$TMP_GEOFILES_FOLDER/geoip.dat" ] && geoip_status="ok" || geoip_status="missing"
 
-    printf '{"podkop_xray_version":"%s","xray_version":"%s","openwrt_version":"%s","device_model":"%s","geofiles_release":"%s","geosite_status":"%s","geoip_status":"%s"}\n' \
+    printf '{"podkop_version":"%s","xray_version":"%s","openwrt_version":"%s","device_model":"%s","geofiles_release":"%s","geosite_status":"%s","geoip_status":"%s"}\n' \
         "$PODKOP_XRAY_VERSION" "$xray_version" "$openwrt_version" "$device_model" "$geofiles_release" "$geosite_status" "$geoip_status"
 }
 

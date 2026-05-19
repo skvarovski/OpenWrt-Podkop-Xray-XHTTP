@@ -101,7 +101,7 @@ update_geofiles() {
     if file_exists "$tmpfile"; then
         local filesize
         filesize=$(wc -c < "$tmpfile" 2>/dev/null)
-        if [ "$filesize" -gt 102400 ]; then
+        if [ "$filesize" -gt 1024 ]; then
             mv -f "$tmpfile" "$xray_data_dir/geosite.dat"
             log "geosite.dat updated successfully (${filesize} bytes)"
             files_updated=1
@@ -124,7 +124,7 @@ update_geofiles() {
     if file_exists "$tmpfile_geoip"; then
         local geoip_size
         geoip_size=$(wc -c < "$tmpfile_geoip" 2>/dev/null)
-        if [ "$geoip_size" -gt 102400 ]; then
+        if [ "$geoip_size" -gt 1024 ]; then
             mv -f "$tmpfile_geoip" "$xray_data_dir/geoip.dat"
             log "geoip.dat updated successfully (${geoip_size} bytes)"
             files_updated=1

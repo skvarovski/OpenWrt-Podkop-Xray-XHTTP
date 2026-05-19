@@ -100,7 +100,7 @@ config section 'main'
         option connection_type 'proxy'
         option proxy_config_type 'url'
         option proxy_string 'vless://UUID@server:443?type=xhttp&security=reality&pbk=KEY&sid=ID&sni=example.com&fp=chrome&path=/tunnel&mode=auto'
-        option rules_type 'block_proxy_direct'
+        option rules_type 'block_direct_proxy'
         list geosite_proxy 'RU-BLOCKED'
         list geosite_proxy 'CATEGORY-MEDIA'
         list geosite_direct 'CATEGORY-RU'
@@ -153,14 +153,14 @@ socks://user:pass@127.0.0.1:1080
 
 ### 📐 Rules Type
 
-Управляет порядком применения правил geosite/geoip (первое совпадение побеждает). Последнее слово определяет catch-all для несовпавшего трафика:
+Управляет порядком применения правил geosite/geoip (первое совпадение побеждает). Последнее слово определяет catch-all для несовпавшего трафика. По умолчанию geo/direct-списки задают, что идёт напрямую, а весь остальной трафик уходит через прокси (VPN):
 
 | Значение | Порядок | Catch-all |
 |----------|---------|-----------|
 | `proxy_direct_block` | Proxy → Direct → Block | block |
-| `block_proxy_direct` | Block → Proxy → Direct (по умолчанию) | direct |
+| `block_proxy_direct` | Block → Proxy → Direct | direct |
 | `direct_proxy_block` | Direct → Proxy → Block | block |
-| `block_direct_proxy` | Block → Direct → Proxy | proxy |
+| `block_direct_proxy` | Block → Direct → Proxy (по умолчанию) | proxy |
 | `proxy_everything` | все списки игнорируются | proxy |
 
 `block_direct_proxy` — всё, что не попало в явные block/direct-списки, уходит через прокси (политика «VPN по умолчанию, кроме явно указанного»). `proxy_everything` полностью игнорирует geosite/geoip/user-списки секции: весь дошедший до xray трафик идёт в proxy outbound.

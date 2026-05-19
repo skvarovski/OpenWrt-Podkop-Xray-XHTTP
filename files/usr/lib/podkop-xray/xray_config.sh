@@ -528,7 +528,7 @@ xray_configure_routing() {
                 },
                 {
                     type: "field",
-                    domain: ["geosite:private"],
+                    domain: ["geosite:internal-private"],
                     outboundTag: $direct_tag
                 },
                 {
