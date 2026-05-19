@@ -32,6 +32,40 @@ armv7*)  XRAY_ARCH="arm32-v7a" ;;
 *)       echo "Unsupported arch: $ARCH"; exit 1 ;;
 esac
 
+# Ensure the OpenWrt package mirror is reachable before any `apk` call.
+# Some uplinks hand out a DNS that resolves downloads.openwrt.org (Fastly)
+# to an IP that is unreachable on TCP/443 — ping works, HTTPS times out —
+# which makes `apk` fail with "wget: Operation not permitted". Detect that
+# and pin a working Fastly IP into /etc/hosts (musl reads /etc/hosts
+# before consulting DNS, so this fixes apk, wget and curl alike).
+ensure_openwrt_mirror() {
+    host="downloads.openwrt.org"
+    probe="https://$host/releases/"
+
+    if wget -q -T 10 -O /dev/null "$probe" 2>/dev/null; then
+        return 0
+    fi
+    echo "WARNING: $host unreachable — resolving via public DNS..."
+
+    for dns in 8.8.8.8 1.1.1.1 9.9.9.9; do
+        for ip in $(nslookup "$host" "$dns" 2>/dev/null \
+                    | awk '/^Address/ {print $2}' \
+                    | grep -E '^[0-9]+\.[0-9.]+$'); do
+            sed -i '/# podkop-xray installer$/d' /etc/hosts 2>/dev/null
+            echo "$ip $host  # podkop-xray installer" >> /etc/hosts
+            if wget -q -T 10 -O /dev/null "$probe" 2>/dev/null; then
+                echo "Using mirror IP $ip for $host"
+                return 0
+            fi
+        done
+    done
+
+    sed -i '/# podkop-xray installer$/d' /etc/hosts 2>/dev/null
+    echo "WARNING: no reachable $host IP found — apk may fail"
+    return 0
+}
+ensure_openwrt_mirror
+
 echo "=== Installing xray-core $XRAY_VER ($XRAY_ARCH) ==="
 # Ensure unzip is available
 if ! command -v unzip >/dev/null 2>&1; then

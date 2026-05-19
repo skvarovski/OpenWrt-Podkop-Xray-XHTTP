@@ -39,6 +39,15 @@ uci commit system
 # LAN IP адрес
 uci set network.lan.ipaddr='192.168.7.5'
 uci set network.lan.netmask='255.255.255.0'
+
+# Публичный DNS — чтобы apk/install.sh могли скачивать пакеты с
+# downloads.openwrt.org. DNS, выдаваемый аплинком, может отдавать
+# недоступные Fastly-адреса (TCP/443 в таймаут) и ломать apk.
+uci -q delete network.lan.dns
+uci add_list network.lan.dns='8.8.8.8'
+uci add_list network.lan.dns='1.1.1.1'
+uci set network.lan.peerdns='0'
+
 uci commit network
 /etc/init.d/network restart
 
